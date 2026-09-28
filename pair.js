@@ -229,6 +229,7 @@ import {
     jidNormalizedUser,
     isPnUser
 } from '@whiskeysockets/baileys';
+import { installButtonMode, sendList, extractIncoming, isReplyTo, sameChat } from './buttons.js';
 
 export const router = express.Router();
 if (process.env.ALLOW_INSECURE_TLS === 'true') process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
@@ -241,6 +242,7 @@ const config = {
     AUTO_TYPING: 'false',
     AUTO_REACT: 'false',
     READ_CMD: 'false',
+    BUTTON_MODE: 'false',
     API_MAIN_URL: 'https://zara.laksidu.site',
     API_MAIN_URL2:'https://zara.laksidu.site',
     API_CINESUBZ_URL:'https://api-siteh-22e22e4cb068.herokuapp.com',
@@ -517,6 +519,12 @@ async function setupCommandHandlers(socket, number) {
     const sanitizedNumber = number.replace(/[^0-9]/g, '');
     let sessionConfig = await loadUserConfig(sanitizedNumber);
     activeSockets.set(sanitizedNumber, { socket, config: sessionConfig });
+
+    // 🔘 Button mode engine (BUTTON_MODE=true nam numbered lists buttons wenawa)
+    installButtonMode(socket, {
+        isOn: () => sessionConfig.BUTTON_MODE === 'true',
+        prefix: () => sessionConfig.PREFIX || config.PREFIX || '.'
+    });
 
     // 🆕 Web panel eken / wenath tenakin DB eke config eka wenas kalath, MongoDB Change Stream eken
     // (polling nathuwa) real-time widihata bot ekatama apply karanawa. Meka DB ekata continuous load
@@ -1958,6 +1966,7 @@ case 'help': {
                 cmds: [
                     ['cinesubz', 'Sinhala sub movies'],
                     ['sinhalasub', 'Sinhala sub movies'],
+                    ['cineverse', 'CineVerseLK movies & series'],
                     ['cinetv', 'TV series'],
                     ['cin', 'Cine movies (alt)'],
                     ['movie', 'Multi source search'],
@@ -2055,7 +2064,9 @@ case 'help': {
             .map(([k, c]) => `│ ${k}\uFE0F\u20E3 ${c.emoji} ${c.title}  ·  ${c.cmds.length}`)
             .join('\n');
 
-        const mainMenuMsg =
+        const btnOn = () => sessionConfig.BUTTON_MODE === 'true';
+        const toggleKey = String(Object.keys(categories).length + 1);
+        const buildMain = () =>
 `╭━━━━━━━━━━━━━━━━━━━╮
 ┃  ✦ *${botName}* ✦
 ╰━━━━━━━━━━━━━━━━━━━╯
@@ -2073,8 +2084,9 @@ case 'help': {
 
 ╭─「 📂 *MENU LIST* 」
 ${catLines}
+│ ${toggleKey}\uFE0F\u20E3 🔘 BUTTON MODE  ·  ${btnOn() ? 'ON ✅' : 'OFF ❌'}
 ╰──────────────────
-💬 _Reply to this message with a number (1-${Object.keys(categories).length})_
+💬 _Reply to this message with a number (1-${toggleKey})_
 
 > ${footer}`;
 
@@ -2084,7 +2096,7 @@ ${catLines}
         };
 
         const menuIds = new Set();
-        const sentMsg = await socket.sendMessage(sender, { image: menuImage, caption: mainMenuMsg }, { quoted: msg });
+        const sentMsg = await socket.sendMessage(sender, { image: menuImage, caption: buildMain() }, { quoted: msg });
         if (sentMsg?.key?.id) menuIds.add(sentMsg.key.id);
 
         const originalSender = (msg.key.participant || msg.key.remoteJid || '').split('@')[0].split(':')[0];
@@ -2104,8 +2116,25 @@ ${catLines}
                 const replyText = (replyMek.message.extendedTextMessage?.text || '').trim();
 
                 if (replyText === '0') {
-                    const s = await socket.sendMessage(sender, { image: menuImage, caption: mainMenuMsg }, { quoted: replyMek });
+                    const s = await socket.sendMessage(sender, { image: menuImage, caption: buildMain() }, { quoted: replyMek });
                     if (s?.key?.id) menuIds.add(s.key.id);
+                    return;
+                }
+
+                // 🔘 Button mode toggle (owner / admin only)
+                if (replyText === toggleKey) {
+                    const ADMIN_NUMBERS_T = (process.env.ADMIN_NUMBERS || '').split(',').map(n => n.trim()).filter(Boolean);
+                    if (!isOwner && !ADMIN_NUMBERS_T.includes(senderNumber)) {
+                        await socket.sendMessage(sender, { text: '❌ *Admin only!*' }, { quoted: replyMek });
+                        return;
+                    }
+                    const newVal = btnOn() ? 'false' : 'true';
+                    sessionConfig = { ...sessionConfig, BUTTON_MODE: newVal };
+                    await updateUserConfig(sanitizedNumber, sessionConfig);
+                    activeSockets.set(sanitizedNumber, { socket, config: sessionConfig });
+                    await socket.sendMessage(sender, { text: `🔘 *Button Mode ${newVal === 'true' ? 'ON ✅' : 'OFF ❌'}*` }, { quoted: replyMek });
+                    const sm = await socket.sendMessage(sender, { image: menuImage, caption: buildMain() }, { quoted: replyMek });
+                    if (sm?.key?.id) menuIds.add(sm.key.id);
                     return;
                 }
 
@@ -2120,7 +2149,23 @@ ${catLines}
                     }
                 }
 
-                const s = await socket.sendMessage(sender, { text: renderCategory(cat) }, { quoted: replyMek });
+                let s;
+                if (btnOn()) {
+                    try {
+                        const rows = cat.cmds.map(([cmd, desc]) => ({ title: `${P}${cmd}`, description: desc, id: `BTN|CMD|${cmd}` }));
+                        rows.push({ title: '⬅️ Back to menu', description: 'Main menu ekata', id: 'BTN|NUM|{ID}|0' });
+                        s = await sendList(socket, sender, {
+                            text: `╭─「 ${cat.emoji} *${cat.title}* 」\n│ 👇 Command ekak select karanna\n╰──────────────────${cat.note || ''}\n\n> ${footer}`,
+                            buttonText: '📋 Commands',
+                            rows,
+                            quoted: replyMek
+                        });
+                    } catch (btnErr) {
+                        console.error('Menu button list failed, using text:', btnErr.message);
+                        s = null;
+                    }
+                }
+                if (!s) s = await socket.sendMessage(sender, { text: renderCategory(cat) }, { quoted: replyMek });
                 if (s?.key?.id) menuIds.add(s.key.id);
             } catch (err) {
                 console.error('Menu reply error:', err.message);
@@ -3709,12 +3754,12 @@ case 'cv': {
 
         const handleSelection = async ({ messages }) => {
             const replyMek = messages?.[0];
-            if (!replyMek?.message || replyMek.key.remoteJid !== sender) return;
-            if (replyMek.key.fromMe) return;
+            if (!replyMek?.message || replyMek.key.fromMe) return;
+            if (!sameChat(replyMek.key, sender)) return;
 
-            const text = (replyMek.message.conversation || replyMek.message.extendedTextMessage?.text || '').trim();
-            const isReply = replyMek.message.extendedTextMessage?.contextInfo?.stanzaId === searchMsgID;
-            if (!isReply) return;
+            // quoted reply OR bare number, ephemeral/wrapped messages, button taps - all handled
+            const { text } = extractIncoming(replyMek);
+            if (!isReplyTo(replyMek, searchMsgID)) return;
 
             const choice = parseInt(text) - 1;
             if (isNaN(choice) || choice < 0 || choice >= results.length) {
@@ -3785,12 +3830,11 @@ case 'cv': {
 
                 const handleDownload = async ({ messages: dlMsgs }) => {
                     const dlMek = dlMsgs?.[0];
-                    if (!dlMek?.message || dlMek.key.remoteJid !== sender) return;
-                    if (dlMek.key.fromMe) return;
+                    if (!dlMek?.message || dlMek.key.fromMe) return;
+                    if (!sameChat(dlMek.key, sender)) return;
 
-                    const dlText = (dlMek.message.conversation || dlMek.message.extendedTextMessage?.text || '').trim();
-                    const isDlReply = dlMek.message.extendedTextMessage?.contextInfo?.stanzaId === infoMsgID;
-                    if (!isDlReply) return;
+                    const { text: dlText } = extractIncoming(dlMek);
+                    if (!isReplyTo(dlMek, infoMsgID)) return;
 
                     const dlIdx = parseInt(dlText) - 1;
                     if (isNaN(dlIdx) || dlIdx < 0 || dlIdx >= validDownloads.length) {
@@ -3872,7 +3916,11 @@ case 'cv': {
                     }
                 };
 
-                global.cineverseSessions[sessionKey].listener = handleDownload;
+                // session eka 5min timeout ekakin marenna kalin download listener eka alut karanawa (10 min)
+                const curSess = global.cineverseSessions[sessionKey] || (global.cineverseSessions[sessionKey] = {});
+                if (curSess.timeout) clearTimeout(curSess.timeout);
+                curSess.listener = handleDownload;
+                curSess.timeout = setTimeout(() => cleanup(), 600000);
                 socket.ev.on('messages.upsert', handleDownload);
 
             } catch (infoErr) {
@@ -12296,6 +12344,27 @@ case 'accesskey': {
 // ==========================================
 // SYSTEM CONFIGURATION & MONGODB SETTING COMMAND (.set)
 // ==========================================
+case 'button':
+case 'buttons': {
+    if (!isOwner) {
+        return await socket.sendMessage(sender, { text: '❌ *Only the bot owner can use this command.*' }, { quoted: msg });
+    }
+    const opt = (args[0] || '').toLowerCase();
+    const P2 = sessionConfig.PREFIX || config.PREFIX || '.';
+    if (!['on', 'off'].includes(opt)) {
+        return await socket.sendMessage(sender, {
+            text: `🔘 *BUTTON MODE :* ${sessionConfig.BUTTON_MODE === 'true' ? 'ON ✅' : 'OFF ❌'}\n\n_${P2}button on_  — buttons ON\n_${P2}button off_ — number reply mode`
+        }, { quoted: msg });
+    }
+    sessionConfig = { ...sessionConfig, BUTTON_MODE: opt === 'on' ? 'true' : 'false' };
+    await updateUserConfig(sanitizedNumber, sessionConfig);
+    activeSockets.set(sanitizedNumber, { socket, config: sessionConfig });
+    await socket.sendMessage(sender, {
+        text: `🔘 *Button Mode ${opt === 'on' ? 'ON ✅' : 'OFF ❌'}*\n\n_${opt === 'on' ? 'Dan list / number replies buttons widihata enawa.' : 'Dan wenas kalaa numbers reply karala use karanna.'}_`
+    }, { quoted: msg });
+    break;
+}
+
 case 'set':
 case 'setting': {
     if (!isOwner) {
@@ -12317,6 +12386,7 @@ case 'setting': {
             `🐞 \`STATUS_VIEW\` (true/false)\n` +
             `🐞 \`AUTO_LIKE\` (true/false)\n` +
             `🐞 \`ANTI_DELETE\` (true/false)\n` +
+            `🐞 \`BUTTON_MODE\` (true/false)\n` +
             `🐞 \`MOVIE_FOOTER\`\n` +
             `🐞 \`MOVIE_CAPTION\`\n` +
             `🐞 \`BOT_NAME\`\n` +
@@ -12341,7 +12411,7 @@ case 'setting': {
     const validKeys = [
         'PREFIX', 'AUTO_RECORDING', 'AUTO_TYPING', 'MODE', 'JID',
         'ALWAYS_ONLINE', 'ALWAYS_MSG_SEEN', 'STATUS_VIEW', 'AUTO_LIKE',
-        'ANTI_DELETE', 'MOVIE_FOOTER', 'MOVIE_CAPTION', 'BOT_NAME', 'BOT_IMAGE', 'BOT_FOOTER', 'AIR_FOOTER'
+        'ANTI_DELETE', 'BUTTON_MODE', 'MOVIE_FOOTER', 'MOVIE_CAPTION', 'BOT_NAME', 'BOT_IMAGE', 'BOT_FOOTER', 'AIR_FOOTER'
     ];
 
     const pairs = input.split(',');
