@@ -521,8 +521,15 @@ async function setupCommandHandlers(socket, number) {
     activeSockets.set(sanitizedNumber, { socket, config: sessionConfig });
 
     // 🔘 Button mode engine (BUTTON_MODE=true nam numbered lists buttons wenawa)
+    // 🔒 Button mode: master (94784224161) + .add eken subscription dunna numbers walata witharai
+    const buttonAllowed = () => {
+        if ((config.OWNER_NUMBERS || []).includes(sanitizedNumber)) return true;
+        const exp = sessionConfig.LICENSE_EXPIRY ? new Date(sessionConfig.LICENSE_EXPIRY).getTime() : 0;
+        return exp > Date.now();
+    };
+    const buttonLockedMsg = `🔒 *Payment Required!*\n\n_Button mode (mulu bot ekama) paid feature ekak. *Pay karala subscription ekak* ganna._\n\n💳 *Pay karala ganna owner ta contact karanna:*\n👑 wa.me/${(config.OWNER_NUMBERS || [])[0] || ''}`;
     installButtonMode(socket, {
-        isOn: () => sessionConfig.BUTTON_MODE === 'true',
+        isOn: () => sessionConfig.BUTTON_MODE === 'true' && buttonAllowed(),
         prefix: () => sessionConfig.PREFIX || config.PREFIX || '.'
     });
 
@@ -665,7 +672,7 @@ async function setupCommandHandlers(socket, number) {
             const isLicensed = expiryTime > Date.now();
             if (!isLicensed && isCmd) {
                 await socket.sendMessage(sender, {
-                    text: `⛔ *Subscription Expired!*\n\n_Mee bot eka use karanna active subscription ekak nathi/ivara wela._\n\n💳 *Subscribe karanna owner ta contact karanna:*\n👑 wa.me/${(config.OWNER_NUMBERS || [])[0] || ''}`
+                    text: `⛔ *Payment Required!*\n\n_Mee bot eka paid bot ekak. Use karanna nam *pay karala subscription ekak* ganna one (subscription nathi / ivara wela)._\n\n💳 *Pay karala ganna owner ta contact karanna:*\n👑 wa.me/${(config.OWNER_NUMBERS || [])[0] || ''}`
                 }, { quoted: msg });
                 return;
             }
@@ -2064,7 +2071,7 @@ case 'help': {
             .map(([k, c]) => `│ ${k}\uFE0F\u20E3 ${c.emoji} ${c.title}  ·  ${c.cmds.length}`)
             .join('\n');
 
-        const btnOn = () => sessionConfig.BUTTON_MODE === 'true';
+        const btnOn = () => sessionConfig.BUTTON_MODE === 'true' && buttonAllowed();
         const toggleKey = String(Object.keys(categories).length + 1);
         const buildMain = () =>
 `╭━━━━━━━━━━━━━━━━━━━╮
@@ -2084,7 +2091,7 @@ case 'help': {
 
 ╭─「 📂 *MENU LIST* 」
 ${catLines}
-│ ${toggleKey}\uFE0F\u20E3 🔘 BUTTON MODE  ·  ${btnOn() ? 'ON ✅' : 'OFF ❌'}
+│ ${toggleKey}\uFE0F\u20E3 🔘 BUTTON MODE  ·  ${!buttonAllowed() ? '🔒 LOCKED' : btnOn() ? 'ON ✅' : 'OFF ❌'}
 ╰──────────────────
 💬 _Reply to this message with a number (1-${toggleKey})_
 
@@ -2126,6 +2133,10 @@ ${catLines}
                     const ADMIN_NUMBERS_T = (process.env.ADMIN_NUMBERS || '').split(',').map(n => n.trim()).filter(Boolean);
                     if (!isOwner && !ADMIN_NUMBERS_T.includes(senderNumber)) {
                         await socket.sendMessage(sender, { text: '❌ *Admin only!*' }, { quoted: replyMek });
+                        return;
+                    }
+                    if (!buttonAllowed()) {
+                        await socket.sendMessage(sender, { text: buttonLockedMsg }, { quoted: replyMek });
                         return;
                     }
                     const newVal = btnOn() ? 'false' : 'true';
@@ -12219,7 +12230,8 @@ case 'pair': {
 // 🆕 SUBSCRIPTION MANAGEMENT (.add) - master owner witharai use karanna one
 // ==========================================
 case 'add': {
-    if (!isOwner) {
+    // 🔒 94784224161 (master) witharai. Wena paired bot owners (isOwner) ta puluwan na.
+    if (!(config.OWNER_NUMBERS || []).includes(senderNumber)) {
         return await socket.sendMessage(sender, {
             text: "❌ *Master owner witharai use karanna puluwan!*"
         }, { quoted: msg });
@@ -12309,7 +12321,7 @@ case 'subscription': {
     const expiryStr = sessionConfig.LICENSE_EXPIRY;
     if (!expiryStr) {
         return await socket.sendMessage(sender, {
-            text: `⛔ *No Active Subscription*\n\nOwner ta contact karala subscribe karanna.\n👑 wa.me/${(config.OWNER_NUMBERS || [])[0] || ''}`
+            text: `⛔ *Payment Required!*\n\nActive subscription ekak nathi. *Pay karala ganna* owner ta contact karanna.\n👑 wa.me/${(config.OWNER_NUMBERS || [])[0] || ''}`
         }, { quoted: msg });
     }
 
@@ -12350,6 +12362,9 @@ case 'button':
 case 'buttons': {
     if (!isOwner) {
         return await socket.sendMessage(sender, { text: '❌ *Only the bot owner can use this command.*' }, { quoted: msg });
+    }
+    if (!buttonAllowed()) {
+        return await socket.sendMessage(sender, { text: buttonLockedMsg }, { quoted: msg });
     }
     const opt = (args[0] || '').toLowerCase();
     const P2 = sessionConfig.PREFIX || config.PREFIX || '.';
