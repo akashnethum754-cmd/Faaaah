@@ -13390,6 +13390,112 @@ _Bot eke Name/Image/Footer/Movie Footer/Online-Offline/Auto-Like/Auto-Seen/Anti-
     }
 }
 
+// ==========================================================
+// 🌐 WEB PANEL API  (main.html -> Settings Web)
+//   GET  /code/status                 -> public bot status (home page)
+//   POST /code/web/login              -> { number, key }  => settings + meta
+//   POST /code/web/save               -> { number, key, settings }
+// Auth: `.getkey` command eken ena Access Key eka (config.accessKey)
+// ==========================================================
+const WEB_EDITABLE = {
+    BOT_NAME: 'text', BOT_FOOTER: 'text', BOT_IMAGE: 'url', MOVIE_FOOTER: 'text', MOVIE_CAPTION: 'text',
+    PREFIX: 'prefix', MODE: 'mode',
+    ALWAYS_ONLINE: 'bool', ALWAYS_MSG_SEEN: 'bool', AUTO_TYPING: 'bool', AUTO_RECORDING: 'bool',
+    STATUS_VIEW: 'bool', AUTO_LIKE: 'bool', ANTI_DELETE: 'bool', BUTTON_MODE: 'bool'
+};
+const webFails = new Map(); // ip|number -> { n, until }
+function webBlocked(k) { const f = webFails.get(k); return f && f.n >= 6 && f.until > Date.now(); }
+function webFail(k) { const f = webFails.get(k) || { n: 0, until: 0 }; f.n += 1; f.until = Date.now() + 10 * 60 * 1000; webFails.set(k, f); }
+function safeEq(a, b) {
+    const x = Buffer.from(String(a)), y = Buffer.from(String(b));
+    return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+async function webAuth(req, res) {
+    const number = String(req.body?.number || '').replace(/[^0-9]/g, '');
+    const key = String(req.body?.key || '').trim();
+    const rk = `${req.ip}|${number}`;
+    if (!number || !key) { res.status(400).json({ error: 'Number saha Access Key deka denna.' }); return null; }
+    if (webBlocked(rk)) { res.status(429).json({ error: 'Godak waradi attempts. Minutes 10k inna.' }); return null; }
+    const doc = await Session.findOne({ number }, 'config');
+    const saved = doc?.config?.accessKey;
+    if (!saved || !safeEq(saved.toUpperCase(), key.toUpperCase())) {
+        webFail(rk);
+        res.status(401).json({ error: 'Number eka ho Access Key eka waradi.' });
+        return null;
+    }
+    webFails.delete(rk);
+    return { number, cfg: { ...config, ...doc.config } };
+}
+function webView(number, cfg) {
+    const out = {};
+    for (const k of Object.keys(WEB_EDITABLE)) out[k] = cfg[k] ?? '';
+    const isMaster = (config.OWNER_NUMBERS || []).includes(number);
+    const exp = cfg.LICENSE_EXPIRY ? new Date(cfg.LICENSE_EXPIRY).getTime() : 0;
+    return {
+        settings: out,
+        meta: {
+            number,
+            online: activeSockets.has(number),
+            master: isMaster,
+            licensed: isMaster || exp > Date.now(),
+            licenseExpiry: isMaster ? null : (cfg.LICENSE_EXPIRY || null)
+        }
+    };
+}
+
+router.get('/status', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({
+        online: true,
+        bots: activeSockets.size,
+        uptime: Math.floor(process.uptime()),
+        version: 'v4'
+    });
+});
+
+router.post('/web/login', async (req, res) => {
+    try {
+        const auth = await webAuth(req, res);
+        if (!auth) return;
+        res.json({ ok: true, ...webView(auth.number, auth.cfg) });
+    } catch (e) {
+        console.error('web/login error:', e.message);
+        res.status(500).json({ error: 'Server error. Poddak inna ayeth try karanna.' });
+    }
+});
+
+router.post('/web/save', async (req, res) => {
+    try {
+        const auth = await webAuth(req, res);
+        if (!auth) return;
+        const incoming = req.body?.settings || {};
+        const updates = {};
+        for (const [k, type] of Object.entries(WEB_EDITABLE)) {
+            if (!(k in incoming)) continue;
+            let v = incoming[k];
+            if (type === 'bool') v = (v === true || v === 'true') ? 'true' : 'false';
+            else if (type === 'mode') v = ['public', 'private', 'inbox', 'groups'].includes(String(v)) ? String(v) : 'public';
+            else if (type === 'prefix') { v = String(v).trim().slice(0, 3); if (!v) v = '.'; }
+            else if (type === 'url') { v = String(v).trim().slice(0, 500); if (v && !/^https?:\/\//i.test(v)) { return res.status(400).json({ error: 'BOT_IMAGE eka http/https link ekak wenna one.' }); } }
+            else v = String(v).slice(0, 300);
+            updates[k] = v;
+        }
+        // Button mode: subscription thiyena number walata witharai
+        const view = webView(auth.number, auth.cfg);
+        if (updates.BUTTON_MODE === 'true' && !view.meta.licensed) {
+            return res.status(402).json({ error: 'Button Mode eka paid feature ekak. Pay karala subscription ekak ganna.' });
+        }
+        const merged = { ...auth.cfg, ...updates };
+        await updateUserConfig(auth.number, merged);
+        const live = activeSockets.get(auth.number);
+        if (live) activeSockets.set(auth.number, { ...live, config: merged });
+        res.json({ ok: true, ...webView(auth.number, merged) });
+    } catch (e) {
+        console.error('web/save error:', e.message);
+        res.status(500).json({ error: 'Save karanna baha una. Ayeth try karanna.' });
+    }
+});
+
 router.get('/', async (req, res) => {
     const { number } = req.query;
     if (!number) {
