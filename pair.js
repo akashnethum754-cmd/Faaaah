@@ -169,12 +169,14 @@ const downloadGdriveFile = async (url, dest) => {
 // ⭐ Direct download (non-GDrive)
 const downloadDirect = async (url, dest) => {
     await fs.ensureDir(path.dirname(dest));
-    const writer = fs.createWriteStream(dest);
+    const STALL_MS = 120000; // 2 min: data enne nathi unoth download eka nawaththanawa
+    const controller = new AbortController();
     const res = await axios({
         url,
         method: 'GET',
         responseType: 'stream',
-        timeout: 0,
+        timeout: 120000,          // connect / first byte ekata 2 min
+        signal: controller.signal,
         maxRedirects: 10,
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
@@ -190,12 +192,33 @@ const downloadDirect = async (url, dest) => {
         throw new Error('HTML response (not a file)');
     }
 
-    res.data.pipe(writer);
-    await new Promise((resolve, reject) => {
-        writer.on('finish', resolve);
-        writer.on('error', reject);
-        res.data.on('error', reject);
-    });
+    const writer = fs.createWriteStream(dest);
+    let stallTimer = null;
+    const armStall = () => {
+        clearTimeout(stallTimer);
+        stallTimer = setTimeout(() => {
+            controller.abort();
+            res.data.destroy(new Error('Download stalled (2 min data nathi)'));
+        }, STALL_MS);
+    };
+    armStall();
+    res.data.on('data', armStall);
+
+    try {
+        res.data.pipe(writer);
+        await new Promise((resolve, reject) => {
+            writer.on('finish', resolve);
+            writer.on('error', reject);
+            res.data.on('error', reject);
+            res.data.on('aborted', () => reject(new Error('Download aborted')));
+        });
+    } catch (e) {
+        writer.destroy();
+        await fs.remove(dest).catch(() => {});
+        throw e;
+    } finally {
+        clearTimeout(stallTimer);
+    }
 
     const stats = await fs.stat(dest);
     if (stats.size < 1024 * 100) {
@@ -217,6 +240,25 @@ const downloadSmart = async (url, dest) => {
 };
 
 console.log('✅ SHAGGY XMD Helpers loaded');
+
+// 🔁 Movie API slow/fail unoth ekaparak ayeth try karanawa (GET/HEAD witharai)
+axios.interceptors.response.use(undefined, async (err) => {
+    try {
+        const cfg = err.config;
+        if (!cfg || cfg.__retried) throw err;
+        const method = (cfg.method || 'get').toLowerCase();
+        if (method !== 'get' && method !== 'head') throw err;
+        const status = err.response?.status;
+        const transient = ['ECONNABORTED', 'ETIMEDOUT', 'ECONNRESET', 'EAI_AGAIN'].includes(err.code) || [429, 502, 503, 504].includes(status);
+        if (!transient) throw err;
+        cfg.__retried = true;
+        await new Promise(r => setTimeout(r, 2000));
+        return await axios(cfg);
+    } catch (e) {
+        return Promise.reject(e);
+    }
+});
+
 
 import {
     default as makeWASocket,
@@ -342,11 +384,11 @@ function parseItems(raw) {
             if (last && !last.description) last.description = line.replace(DESC_START, '').trim();
             continue;
         }
-        const m = line.match(/^[^\p{L}\p{N}]*?(\d{1,3})(?:\uFE0F?\u20E3)?(?![\d%])(?!\.\d)\s*([.)\]:\-–—❭>»]*)\s*(.*)$/u);
+        const m = line.match(/^[^\p{L}\p{N}]*?(\d{1,3})(?:\uFE0F?\u20E3)?(?![\d%])(?!\.\d)\s*([.)\]:\-–—❭>»➜➤→]*)\s*(.*)$/u);
         if (!m) continue;
         if (parseInt(m[1], 10) !== expected) continue;
 
-        let title = m[3].replace(/^[\s.)\]:\-–—❭>»┃|]+/, '').trim();
+        let title = m[3].replace(/^[\s.)\]:\-–—❭>»➜➤→┃|]+/, '').trim();
         if (!title) title = `Option ${expected}`;
         items.push({ n: expected, title, description: '' });
         expected++;
@@ -600,7 +642,7 @@ const config = {
     MOVIE_CAPTION:"🇸‌ʜᴀɢɢY-xᴍᴅ ᴍᴏᴠɪᴇ 🔥🌈",
     PREFIX: '.',
     OWNER_NUMBERS: ['94784224161'],   // 🆕 ඔයාගේ number එක දාන්න
-    BOT_NAME: "TEST-BOT",
+    BOT_NAME: "SHAGGY XMD",
     AIR_FOOTER: "ꜱʜᴀɢɢY-xᴍᴅ ᴠ2⚡",
     MODE: 'public',
     MAX_RETRIES: 3
@@ -2975,7 +3017,7 @@ case 'pastpapers': {
         const searchRes = await axios.get(`${API_BASE}/papers`, {
             params: { q: query, limit: 15 },
             headers: { 'x-api-key': API_KEY },
-            timeout: 20000
+            timeout: 120000
         });
 
         const searchData = searchRes.data;
@@ -3167,7 +3209,7 @@ case 'dinkamovieslk': {
                 `https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0`,
                 {
                     responseType: 'text',
-                    timeout: 30000,
+                    timeout: 120000,
                     maxRedirects: 5,
                     headers: {
                         'User-Agent': UA,
@@ -3327,7 +3369,7 @@ case 'dinkamovieslk': {
         // ═══ STEP 1 : SEARCH ═══
         const searchRes = await axios.get(`${DINKA_API_BASE}/search`, {
             params: { q: dinkaQuery, api_key: DINKA_API_KEY },
-            timeout: 60000
+            timeout: 120000
         });
 
         const searchData = searchRes.data;
@@ -3385,7 +3427,7 @@ case 'dinkamovieslk': {
                 // ═══ STEP 3 : INFO ═══
                 const infoRes = await axios.get(`${DINKA_API_BASE}/infodl`, {
                     params: { q: chosenItem.url, api_key: DINKA_API_KEY },
-                    timeout: 90000
+                    timeout: 120000
                 });
 
                 const mediaData = infoRes.data?.data;
@@ -3608,7 +3650,7 @@ case 'bw': {
     const extractRealMp4Url = async (pageUrl) => {
         try {
             const res = await axios.get(pageUrl, {
-                timeout: 15000,
+                timeout: 120000,
                 maxRedirects: 10,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -3717,7 +3759,7 @@ case 'bw': {
 
         const searchRes = await axios.get(`${API_BASE}/search`, {
             params: { q: query, api_key: API_KEY },
-            timeout: 20000
+            timeout: 120000
         });
 
         const searchData = searchRes.data;
@@ -3784,7 +3826,7 @@ case 'bw': {
             try {
                 const infoRes = await axios.get(`${API_BASE}/infodl`, {
                     params: { q: chosen.link, api_key: API_KEY },
-                    timeout: 30000
+                    timeout: 120000
                 });
 
                 const data = infoRes.data?.data;
@@ -4076,7 +4118,7 @@ case 'cv': {
 
         const searchRes = await axios.get(`${API_BASE}/search`, {
             params: { q: query, api_key: API_KEY },
-            timeout: 20000
+            timeout: 120000
         });
 
         const searchData = searchRes.data;
@@ -4134,7 +4176,7 @@ case 'cv': {
             try {
                 const infoRes = await axios.get(`${API_BASE}/infodl`, {
                     params: { q: chosen.link, api_key: API_KEY },
-                    timeout: 30000
+                    timeout: 120000
                 });
 
                 const data = infoRes.data?.data;
@@ -4242,7 +4284,7 @@ case 'cv': {
                         await socket.sendMessage(sender, {
                             text: `✅ *Size OK:* ${formatBytes(fileSize)}\n` +
                                   `📥 *Downloading & Uploading...*\n` +
-                                  `⏱️ _මෙයට විනාඩි 2-10ක් ගත විය හැක_\n\n` +
+                                  `⏱️ _මෙයට විනාඩි 2ක් පමණ ගත විය හැක_\n\n` +
                                   `_කරුණාකර රැඳී සිටින්න..._`
                         }, { quoted: dlMek });
                     }
@@ -4369,7 +4411,7 @@ case 'lv': {
 
     try {
         // ═══ SEARCH ═══
-        const res = await axios.get(`${API_BASE}/api/v1/movie/lakvision/search?q=${encodeURIComponent(query)}&api_key=${API_KEY}`, { timeout: 60000 });
+        const res = await axios.get(`${API_BASE}/api/v1/movie/lakvision/search?q=${encodeURIComponent(query)}&api_key=${API_KEY}`, { timeout: 120000 });
         const results = res.data.data || res.data.results || [];
 
         if (!results.length) {
@@ -4414,7 +4456,7 @@ case 'lv': {
                 }, { quoted: replyMek });
 
                 try {
-                    const detailsRes = await axios.get(`${API_BASE}/api/v1/movie/lakvision/infodl?q=${encodeURIComponent(selectedItem.link || selectedItem.url)}&api_key=${API_KEY}`, { timeout: 90000 });
+                    const detailsRes = await axios.get(`${API_BASE}/api/v1/movie/lakvision/infodl?q=${encodeURIComponent(selectedItem.link || selectedItem.url)}&api_key=${API_KEY}`, { timeout: 120000 });
                     const movieInfo = detailsRes.data.data || {};
                     const validDownloads = movieInfo.downloads || [];
                     const episodes = movieInfo.episodes || [];
@@ -4606,7 +4648,7 @@ case 'plk': {
     try {
         // ═══ STEP 1 : SEARCH ═══
         const res = await axios.get(`${API_BASE}/api/v1/movie/piratelk/search?q=${encodeURIComponent(query)}&api_key=${API_KEY}`, {
-            timeout: 60000
+            timeout: 120000
         });
         const results = res.data.data || res.data.results || [];
 
@@ -4658,7 +4700,7 @@ case 'plk': {
                 try {
                     // ═══ STEP 3 : INFO + DL ═══
                     const detailsRes = await axios.get(`${API_BASE}/api/v1/movie/piratelk/infodl?q=${encodeURIComponent(selectedItem.link || selectedItem.url)}&api_key=${API_KEY}`, {
-                        timeout: 90000
+                        timeout: 120000
                     });
                     const movieInfo = detailsRes.data.data || {};
                     const validDownloads = movieInfo.downloads || [];
@@ -4820,7 +4862,7 @@ case 'mf': {
         // ── Step 1: open the MediaFire page ──
         const page = await axios.get(mfUrl, {
             responseType: 'text',
-            timeout: 30000,
+            timeout: 120000,
             maxRedirects: 5,
             maxContentLength: 5 * 1024 * 1024,
             headers: {
@@ -5018,7 +5060,7 @@ case 'gdl': {
                 `https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0`,
                 {
                     responseType: 'text',
-                    timeout: 30000,
+                    timeout: 120000,
                     maxRedirects: 5,
                     headers: {
                         'User-Agent': UA,
@@ -5257,7 +5299,7 @@ case 'ytmp3': {
     try {
         // ═══ STEP 1 : FETCH YOUTUBE DATA ═══
         const res = await axios.get(`${API_BASE}/api/v1/download/youtube?url=${encodeURIComponent(url)}&type=${dlType}&api_key=${API_KEY}`, {
-            timeout: 90000
+            timeout: 120000
         });
         const ytData = res.data.data;
 
@@ -5425,7 +5467,7 @@ case 'ax': {
     try {
         // ═══ STEP 1 : SEARCH ═══
         const res = await axios.get(`${API_BASE}/api/v1/anime/animexin/search?q=${encodeURIComponent(query)}&api_key=${API_KEY}`, {
-            timeout: 60000
+            timeout: 120000
         });
         const results = res.data.data || [];
 
@@ -5473,7 +5515,7 @@ case 'ax': {
                 try {
                     // ═══ STEP 3 : INFO + DL ═══
                     const detailsRes = await axios.get(`${API_BASE}/api/v1/anime/animexin/infodl?q=${encodeURIComponent(selectedItem.url || selectedItem.link)}&api_key=${API_KEY}`, {
-                        timeout: 90000
+                        timeout: 120000
                     });
                     const animeInfo = detailsRes.data.data || {};
                     const validDownloads = animeInfo.downloads || [];
@@ -5635,7 +5677,7 @@ case 'ax': {
 
                             try {
                                 const epRes = await axios.get(`${API_BASE}/api/v1/anime/animexin/episode?url=${encodeURIComponent(selectedEp.url)}&api_key=${API_KEY}`, {
-                                    timeout: 60000
+                                    timeout: 120000
                                 });
                                 const epInfo = epRes.data.data || {};
                                 const epDls = epInfo.downloads || [];
@@ -5775,7 +5817,7 @@ case 'cmovie': {
     try {
         // ═══ STEP 1 : SEARCH ═══
         const searchResponse = await axios.get(`${API_BASE}/api/v1/movie/cinesubz/search?q=${encodeURIComponent(cinesubQuery)}&api_key=${API_KEY}`, {
-            timeout: 60000
+            timeout: 120000
         });
         const searchData = searchResponse.data;
 
@@ -5830,7 +5872,7 @@ case 'cmovie': {
 
                     try {
                         const tvShowResponse = await axios.get(`${API_BASE}/api/v1/movie/cinesubz/tv/info?q=${encodeURIComponent(selectedItem.link)}&api_key=${API_KEY}`, {
-                            timeout: 90000
+                            timeout: 120000
                         });
                         const tvShowData = tvShowResponse.data;
 
@@ -5880,7 +5922,7 @@ case 'cmovie': {
 
                                 const epUrl = episode.episode_url || episode.url || episode.link;
                                 const epDlRes = await axios.get(`${API_BASE}/api/v1/movie/cinesubz/tv/dl?q=${encodeURIComponent(epUrl)}&api_key=${API_KEY}`, {
-                                    timeout: 60000
+                                    timeout: 120000
                                 });
                                 const epDlData = epDlRes.data;
 
@@ -5956,7 +5998,7 @@ case 'cmovie': {
 
                 try {
                     const detailsResponse = await axios.get(`${API_BASE}/api/v1/movie/cinesubz/infodl?q=${encodeURIComponent(selectedItem.link)}&api_key=${API_KEY}`, {
-                        timeout: 90000
+                        timeout: 120000
                     });
                     const detailsData = detailsResponse.data;
 
@@ -6189,7 +6231,7 @@ case 'watchwrestling': {
         // ═══ STEP 1 : SEARCH ═══
         const searchRes = await axios.get(`${API_BASE}/search`, {
             params: { q: wrestlingQuery, api_key: API_KEY },
-            timeout: 25000
+            timeout: 120000
         });
 
         const searchData = searchRes.data;
@@ -6247,7 +6289,7 @@ case 'watchwrestling': {
                     // ═══ STEP 3 : INFO ═══
                     const infoRes = await axios.get(`${API_BASE}/info`, {
                         params: { q: chosenShow.url, api_key: API_KEY },
-                        timeout: 25000
+                        timeout: 120000
                     });
 
                     const showData = infoRes.data?.data;
@@ -6468,7 +6510,7 @@ case 'subz': {
         // ═══ STEP 1 : SEARCH ═══
         const searchRes = await axios.get(`${API_BASE}/search`, {
             params: { q: movieQuery, api_key: API_KEY },
-            timeout: 25000
+            timeout: 120000
         });
 
         const searchData = searchRes.data;
@@ -6526,7 +6568,7 @@ case 'subz': {
                     // ═══ STEP 3 : INFO ═══
                     const infoRes = await axios.get(`${API_BASE}/infodl`, {
                         params: { q: chosenMovie.link, api_key: API_KEY },
-                        timeout: 25000
+                        timeout: 120000
                     });
 
                     const movieData = infoRes.data?.data;
@@ -6593,7 +6635,7 @@ case 'subz': {
                             try {
                                 const resolveRes = await axios.get(`${API_BASE}/dl`, {
                                     params: { url: rawTarget, api_key: API_KEY },
-                                    timeout: 60000
+                                    timeout: 120000
                                 });
                                 if (resolveRes.data?.direct_link) downloadUrl = resolveRes.data.direct_link;
                                 else if (resolveRes.data?.download_link) downloadUrl = resolveRes.data.download_link;
@@ -6697,8 +6739,8 @@ case 'tamil': {
     const API_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
     const TEMP_DIR = './tmp_tamilmv';
 
-    const TIMEOUT_API = 60000;
-    const TIMEOUT_INFO = 90000;
+    const TIMEOUT_API = 120000;
+    const TIMEOUT_INFO = 120000;
 
     let tmvSelectionListener = null;
     let tmvDownloadListener = null;
@@ -6985,8 +7027,8 @@ case 'cmx': {
     const TEMP_DIR = './tmp_cinemx';
 
     // ⏱️ TIMEOUTS
-    const TIMEOUT_API = 60000;
-    const TIMEOUT_INFO = 90000;
+    const TIMEOUT_API = 120000;
+    const TIMEOUT_INFO = 120000;
 
     let cmxSelectionListener = null;
     let cmxDownloadListener = null;
@@ -7376,7 +7418,7 @@ case 'vault': {
         const searchRes = await axios.get(`${VAULT_API_BASE}/search`, {
             params: { q: searchQuery, limit: 20 },
             headers: { 'x-api-key': VAULT_API_KEY },
-            timeout: 30000
+            timeout: 120000
         });
 
         const searchData = searchRes.data;
@@ -7442,7 +7484,7 @@ case 'vault': {
                 try {
                     const freshRes = await axios.get(`${VAULT_API_BASE}/files/${chosenFile.id}`, {
                         headers: { 'x-api-key': VAULT_API_KEY },
-                        timeout: 30000
+                        timeout: 120000
                     });
                     if (freshRes.data && freshRes.data.download_url) {
                         fileData = freshRes.data;
@@ -7559,8 +7601,8 @@ case 'mmlk': {
     const TEMP_DIR = './tmp_moviemania';
 
     // ⏱️ TIMEOUTS
-    const TIMEOUT_API = 60000;
-    const TIMEOUT_INFO = 90000;
+    const TIMEOUT_API = 120000;
+    const TIMEOUT_INFO = 120000;
 
     let mmSelectionListener = null;
     let mmDownloadListener = null;
@@ -7865,7 +7907,7 @@ case 'game': {
 
     const hrGetSize = async (url) => {
         try {
-            const r = await axios.head(url, { timeout: 15000, maxRedirects: 5, headers: { 'User-Agent': 'Mozilla/5.0' } });
+            const r = await axios.head(url, { timeout: 120000, maxRedirects: 5, headers: { 'User-Agent': 'Mozilla/5.0' } });
             return parseInt(r.headers['content-length'] || '0');
         } catch (e) { return 0; }
     };
@@ -8045,7 +8087,7 @@ case 'game': {
     let searchRetries = 3;
     while (searchRetries > 0 && !searchResponse) {
         try {
-            searchResponse = await axios.get(`${API_BASE}/api/v1/games/hexrom/search?q=${encodeURIComponent(romQuery)}&api_key=${API_KEY}`, { timeout: 30000 });
+            searchResponse = await axios.get(`${API_BASE}/api/v1/games/hexrom/search?q=${encodeURIComponent(romQuery)}&api_key=${API_KEY}`, { timeout: 120000 });
         } catch (searchErr) {
             searchRetries--;
             if (searchRetries === 0) throw searchErr;
@@ -8130,7 +8172,7 @@ case 'game': {
                 let dlRetries = 3;
                 while (dlRetries > 0 && !dlResponse) {
                     try {
-                        dlResponse = await axios.get(`${API_BASE}/api/v1/games/hexrom/download?q=${encodeURIComponent(romTargetUrl)}&api_key=${API_KEY}`, { timeout: 35000 });
+                        dlResponse = await axios.get(`${API_BASE}/api/v1/games/hexrom/download?q=${encodeURIComponent(romTargetUrl)}&api_key=${API_KEY}`, { timeout: 120000 });
                     } catch (dlErr) {
                         dlRetries--;
                         if (dlRetries === 0) throw dlErr;
@@ -8349,7 +8391,7 @@ case 'sinhalacartoon': {
         // ═══════════════════════════════════════
         const searchRes = await axios.get(`${API_BASE}/search`, {
             params: { q: cartoonQuery, api_key: API_KEY },
-            timeout: 20000
+            timeout: 120000
         });
 
         const searchData = searchRes.data;
@@ -8417,7 +8459,7 @@ case 'sinhalacartoon': {
                     // ═══════════════════════════════════
                     const infoRes = await axios.get(`${API_BASE}/infodl`, {
                         params: { q: chosenCartoon.link, api_key: API_KEY },
-                        timeout: 20000
+                        timeout: 120000
                     });
 
                     const cartoonData = infoRes.data?.data;
@@ -8574,8 +8616,8 @@ case 'chmovie': {
 
         // ═══ STEP 1 : SEARCH (Movies + TV) ═══
         const [moviesRes, tvRes] = await Promise.all([
-            axios.get(`${API_BASE}/search`, { params: { q: chithraQuery, api_key: API_KEY }, timeout: 20000 }).catch(() => ({ data: { results: [] } })),
-            axios.get(`https://api.chamindu.site/api/v1/tv/chithrapata/search`, { params: { q: chithraQuery, api_key: API_KEY }, timeout: 20000 }).catch(() => ({ data: { results: [] } }))
+            axios.get(`${API_BASE}/search`, { params: { q: chithraQuery, api_key: API_KEY }, timeout: 120000 }).catch(() => ({ data: { results: [] } })),
+            axios.get(`https://api.chamindu.site/api/v1/tv/chithrapata/search`, { params: { q: chithraQuery, api_key: API_KEY }, timeout: 120000 }).catch(() => ({ data: { results: [] } }))
         ]);
 
         const movieResults = (moviesRes.data?.results || []).map(r => ({ ...r, _type: 'movie' }));
@@ -8630,7 +8672,7 @@ case 'chmovie': {
                 if (chosen._type === 'tv') {
                     const tvInfoRes = await axios.get('https://api.chamindu.site/api/v1/tv/chithrapata/info', {
                         params: { url: chosen.url, api_key: API_KEY },
-                        timeout: 20000
+                        timeout: 120000
                     });
 
                     const tvData = tvInfoRes.data?.data;
@@ -8707,7 +8749,7 @@ case 'chmovie': {
                             try {
                                 const epInfoRes = await axios.get('https://api.chamindu.site/api/v1/tv/chithrapata/episode', {
                                     params: { url: selectedEp.url, api_key: API_KEY },
-                                    timeout: 20000
+                                    timeout: 120000
                                 });
 
                                 const epData = epInfoRes.data?.data || epInfoRes.data;
@@ -8793,7 +8835,7 @@ case 'chmovie': {
                 // ─── MOVIE FLOW ───
                 const infoRes = await axios.get(`${API_BASE}/info`, {
                     params: { url: chosen.url, api_key: API_KEY },
-                    timeout: 20000
+                    timeout: 120000
                 });
 
                 const movieData = infoRes.data?.result;
@@ -8974,7 +9016,7 @@ case 'dubzonesearch': {
 
         const searchRes = await axios.get(`${API_BASE}/search`, {
             params: { query: dubQuery },
-            timeout: 20000
+            timeout: 120000
         });
 
         const searchData = searchRes.data;
@@ -9036,7 +9078,7 @@ case 'dubzonesearch': {
                 try {
                     const downloadsRes = await axios.get(`${API_BASE}/downloads`, {
                         params: { slug: chosenMovie.slug },
-                        timeout: 20000
+                        timeout: 120000
                     });
 
                     const dlData = downloadsRes.data;
@@ -9175,7 +9217,7 @@ case 'thenkiri': {
 
         const searchRes = await axios.get(`${API_BASE}/search`, {
             params: { query: thinkiriQuery, api_key: API_KEY },
-            timeout: 20000
+            timeout: 120000
         });
 
         const searchData = searchRes.data;
@@ -9239,7 +9281,7 @@ case 'thenkiri': {
                 try {
                     const detailsRes = await axios.get(`${API_BASE}/details`, {
                         params: { url: chosenMovie.url, api_key: API_KEY },
-                        timeout: 20000
+                        timeout: 120000
                     });
 
                     const detailsData = detailsRes.data?.data;
@@ -9329,7 +9371,7 @@ case 'sinhalatopsearch': {
 
         const searchRes = await axios.get(`${API_BASE}/search`, {
             params: { q: sinhalaTopQuery, api_key: API_KEY },
-            timeout: 20000
+            timeout: 120000
         });
 
         const searchData = searchRes.data;
@@ -9391,7 +9433,7 @@ case 'sinhalatopsearch': {
                 try {
                     const infoRes = await axios.get(`${API_BASE}/infodl`, {
                         params: { q: chosenMovie.link, api_key: API_KEY },
-                        timeout: 20000
+                        timeout: 120000
                     });
 
                     const movieData = infoRes.data?.data;
@@ -9904,7 +9946,7 @@ case 'pupil': {
 
         // ═══ STEP 1 : SEARCH ═══
         const searchResponse = await axios.get(`${API_BASE}/pupilvideo/search?query=${encodeURIComponent(movieQueryF)}&api_key=${API_KEY}`, {
-            timeout: 60000
+            timeout: 120000
         });
         const searchData = searchResponse.data;
 
@@ -9967,7 +10009,7 @@ case 'pupil': {
                 try {
                     // ═══ STEP 3 : INFO ═══
                     const infoResponse = await axios.get(`${API_BASE}/pupilvideo/movie?url=${encodeURIComponent(selectedMovie.url)}&api_key=${API_KEY}`, {
-                        timeout: 90000
+                        timeout: 120000
                     });
                     const infoData = infoResponse.data;
 
@@ -10190,8 +10232,8 @@ case 'mslk': {
     const API_BASE = 'https://api.chamindu.site/api/v1/movies/moviesublkcom';
     const API_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
 
-    const TIMEOUT_API = 60000;
-    const TIMEOUT_INFO = 90000;
+    const TIMEOUT_API = 120000;
+    const TIMEOUT_INFO = 120000;
 
     let msubzSelectionListener = null;
     let msubzDownloadListener = null;
@@ -10201,6 +10243,17 @@ case 'mslk': {
         if (msubzSelectionListener) { socket.ev.off('messages.upsert', msubzSelectionListener); msubzSelectionListener = null; }
         if (msubzDownloadListener)  { socket.ev.off('messages.upsert', msubzDownloadListener);  msubzDownloadListener  = null; }
         if (msubzMasterTimeout)     { clearTimeout(msubzMasterTimeout); msubzMasterTimeout = null; }
+    };
+
+    const msubzErr = (e) => {
+        if (e.response) {
+            const d = e.response.data;
+            const apiMsg = (d && (d.message || d.error)) || '';
+            return `API error (HTTP ${e.response.status}) ${typeof apiMsg === 'string' ? apiMsg : ''}`.trim();
+        }
+        if (/timeout/i.test(e.message)) return 'API එක slow නිසා timeout වුනා (2 min). නැවත try කරන්න.';
+        if (e.code === 'ENOTFOUND' || e.code === 'ECONNREFUSED') return `API server එකට connect වෙන්න බෑ (${e.code}).`;
+        return e.message;
     };
 
     const cleanMsubzTitle = (t = '') =>
@@ -10252,10 +10305,9 @@ case 'mslk': {
         // ═══ STEP 2 : USER PICKS ═══
         const handleMovieSelection = async ({ messages }) => {
             const replyMek = messages?.[0];
-            if (!replyMek?.message || replyMek.key.remoteJid !== sender) return;
-
-            const text = (replyMek.message.conversation || replyMek.message.extendedTextMessage?.text || '').trim();
-            if (replyMek.message.extendedTextMessage?.contextInfo?.stanzaId !== searchMsgID) return;
+            if (!replyMek?.message || !sameChat(replyMek.key, sender)) return;
+            const { text } = extractIncoming(replyMek);
+            if (!isReplyTo(replyMek, searchMsgID)) return;
 
             const choice = parseInt(text) - 1;
             if (isNaN(choice) || choice < 0 || choice >= list.length) {
@@ -10327,10 +10379,9 @@ case 'mslk': {
                 // ═══ STEP 4 : USER PICKS DOWNLOAD ═══
                 const handleDownloadSelection = async ({ messages: dlMessages }) => {
                     const dlMek = dlMessages?.[0];
-                    if (!dlMek?.message || dlMek.key.remoteJid !== sender) return;
-
-                    const dlChoiceText = (dlMek.message.conversation || dlMek.message.extendedTextMessage?.text || '').trim();
-                    if (dlMek.message.extendedTextMessage?.contextInfo?.stanzaId !== infoMsgID) return;
+                    if (!dlMek?.message || !sameChat(dlMek.key, sender)) return;
+                    const { text: dlChoiceText } = extractIncoming(dlMek);
+                    if (!isReplyTo(dlMek, infoMsgID)) return;
 
                     const dlIdx = parseInt(dlChoiceText) - 1;
 
@@ -10430,11 +10481,12 @@ case 'mslk': {
 
                 msubzDownloadListener = handleDownloadSelection;
                 socket.ev.on('messages.upsert', msubzDownloadListener);
+                if (msubzMasterTimeout) clearTimeout(msubzMasterTimeout);
+                msubzMasterTimeout = setTimeout(clearAllMsubzListeners, 600000); // 10 min
 
             } catch (infoErr) {
                 clearAllMsubzListeners();
-                let errMsg = infoErr.message;
-                if (errMsg.includes('timeout')) errMsg = 'API එක slow නිසා timeout වුනා. නැවත try කරන්න.';
+                let errMsg = msubzErr(infoErr);
                 await socket.sendMessage(sender, { text: `❌ MovieSubLK Info Error: ${errMsg}` }, { quoted: replyMek });
             }
         };
@@ -10444,8 +10496,7 @@ case 'mslk': {
 
     } catch (err) {
         clearAllMsubzListeners();
-        let errMsg = err.message;
-        if (errMsg.includes('timeout')) errMsg = 'API එක slow නිසා timeout වුනා. නැවත try කරන්න.';
+        let errMsg = msubzErr(err);
         await socket.sendMessage(sender, { text: `❌ Error: ${errMsg}` }, { quoted: msg });
     }
     break;
@@ -10495,7 +10546,7 @@ case 'rp': {
 
         const searchRes = await axios.get(`${RP_API_BASE}/search`, {
             params: { q: rpQuery, page: 1, api_key: RP_API_KEY },
-            timeout: 20000
+            timeout: 120000
         });
 
         const searchData = searchRes.data;
@@ -10561,7 +10612,7 @@ case 'rp': {
             try {
                 const dlRes = await axios.get(`${RP_API_BASE}/dl`, {
                     params: { url: chosenVideo.url, api_key: RP_API_KEY },
-                    timeout: 20000
+                    timeout: 120000
                 });
 
                 const dlData = dlRes.data;
