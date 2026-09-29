@@ -3406,7 +3406,7 @@ case 'bw': {
         const handleSelection = async ({ messages }) => {
             const replyMek = messages?.[0];
             if (!replyMek?.message || replyMek.key.remoteJid !== sender) return;
-            if (replyMek.key.fromMe) return;
+            if (replyMek.key.fromMe && !/^\d{1,3}$/.test(extractIncoming(replyMek).text)) return; // own-number test: allow typed/tapped numbers
 
             const text = (replyMek.message.conversation || replyMek.message.extendedTextMessage?.text || '').trim();
             const isReply = replyMek.message.extendedTextMessage?.contextInfo?.stanzaId === searchMsgID;
@@ -3484,7 +3484,7 @@ case 'bw': {
                 const handleDownload = async ({ messages: dlMsgs }) => {
                     const dlMek = dlMsgs?.[0];
                     if (!dlMek?.message || dlMek.key.remoteJid !== sender) return;
-                    if (dlMek.key.fromMe) return;
+                    if (dlMek.key.fromMe && !/^\d{1,3}$/.test(extractIncoming(dlMek).text)) return;
 
                     const dlText = (dlMek.message.conversation || dlMek.message.extendedTextMessage?.text || '').trim();
                     const isDlReply = dlMek.message.extendedTextMessage?.contextInfo?.stanzaId === infoMsgID;
@@ -3754,7 +3754,8 @@ case 'cv': {
 
         const handleSelection = async ({ messages }) => {
             const replyMek = messages?.[0];
-            if (!replyMek?.message || replyMek.key.fromMe) return;
+            if (!replyMek?.message) return;
+            if (replyMek.key.fromMe && !/^\d{1,3}$/.test(extractIncoming(replyMek).text)) return; // own-number test: allow typed/tapped numbers
             if (!sameChat(replyMek.key, sender)) return;
 
             // quoted reply OR bare number, ephemeral/wrapped messages, button taps - all handled
@@ -3830,7 +3831,8 @@ case 'cv': {
 
                 const handleDownload = async ({ messages: dlMsgs }) => {
                     const dlMek = dlMsgs?.[0];
-                    if (!dlMek?.message || dlMek.key.fromMe) return;
+                    if (!dlMek?.message) return;
+                    if (dlMek.key.fromMe && !/^\d{1,3}$/.test(extractIncoming(dlMek).text)) return;
                     if (!sameChat(dlMek.key, sender)) return;
 
                     const { text: dlText } = extractIncoming(dlMek);
