@@ -21,7 +21,7 @@
     "split-file": "^2.2.5"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "keywords": [
     "whatsapp",
