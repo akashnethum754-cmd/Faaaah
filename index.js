@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { EventEmitter } from 'events';
 
 const app = express();
+app.set('trust proxy', 1); // Heroku: hariyatama client IP eka (web login rate-limit ekata)
 const __filename = fileURLToPath(import.meta.url);
 const __path = path.dirname(__filename);
 const PORT = process.env.PORT || 8000;
