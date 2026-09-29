@@ -284,7 +284,7 @@ export function installButtonMode(socket, { isOn, prefix }) {
     socket.ev.on('messages.upsert', async ({ messages }) => {
         for (const mek of messages || []) {
             try {
-                if (!mek?.message || mek.key?.fromMe || mek.__synthetic) continue;
+                if (!mek?.message || mek.__synthetic) continue; // fromMe allowed: bot number owner taps buttons on own account
                 const { buttonId } = extractIncoming(mek);
                 if (!buttonId || !buttonId.startsWith('BTN|')) continue;
 
@@ -294,7 +294,7 @@ export function installButtonMode(socket, { isOn, prefix }) {
                         remoteJid: mek.key.remoteJid,
                         remoteJidAlt: mek.key.remoteJidAlt,
                         participant: mek.key.participant,
-                        fromMe: false,
+                        fromMe: !!mek.key.fromMe,
                         id: rid()
                     },
                     pushName: mek.pushName,
