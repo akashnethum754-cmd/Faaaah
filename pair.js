@@ -275,7 +275,7 @@ import {
 // 🔘 BUTTON MODE ENGINE (inlined - separate file ekak one na)
 // ==========================================================
 import * as BaileysNS from '@whiskeysockets/baileys';
-const { installButtonMode, sendList, extractIncoming, isReplyTo, sameChat } = (() => {
+const { installButtonMode, sendList, extractIncoming, isReplyTo, sameChat, unwrap } = (() => {
 const B = BaileysNS;
 // ==========================================================
 // 🔘 BUTTON MODE ENGINE
@@ -615,7 +615,7 @@ function installButtonMode(socket, { isOn, prefix }) {
     console.log('🔘 Button mode engine installed');
 }
 
-return { installButtonMode, sendList, extractIncoming, isReplyTo, sameChat };
+return { installButtonMode, sendList, extractIncoming, isReplyTo, sameChat, unwrap };
 })();
 
 export const router = express.Router();
@@ -636,7 +636,7 @@ const config = {
     API_MOVIE_URL: 'https://api-siteh-22e22e4cb068.herokuapp.com',
     API_KEY:'lakiya_2f3b6c382d1236ad7a08d56331fb679935d51dfc846df2c254093fd1fff9494e',
     BOT_IMAGE:'https://files.catbox.moe/wogma6.jpeg',
-    BOT_FOOTER:"SHAGGY XMD 〽️ᴏᴠɪᴇ Bᴏᴛ ᴠ3",
+    BOT_FOOTER:"SHAGGY XMD 〽️ᴏᴠɪᴇ Bᴏᴛ ᴠ4",
     MGROUP_LINK: 'https://chat.whatsapp.com/EeMhcQufXDFABM1MnR05Wh?s=cl&p=a&mlu=4&ilr=4',
     MOVIE_FOOTER:"⏤͟͟͞͞★❮ SHAGGY XMD 〽️OVIE ⏤͟͟͞͞★",
     MOVIE_CAPTION:"🇸‌ʜᴀɢɢY-xᴍᴅ ᴍᴏᴠɪᴇ 🔥🌈",
@@ -691,6 +691,20 @@ async function loadAutoReplyCache(sanitizedNumber) {
 // 🆕 Anti-Delete feature ekata message content cache karagannawa (memory eke witharai, temporary)
 const messageCache = new Map(); // key: `${remoteJid}:${msgId}` -> { text, senderNumber, timestamp }
 const MESSAGE_CACHE_LIMIT = 500;
+
+const rawCache = new Map(); // `${jid}:${id}` -> { msg, ... }  (media / text okkoma)
+function cacheRaw(msg) {
+    rawCache.set(`${msg.key.remoteJid}:${msg.key.id}`, {
+        msg,
+        pushName: msg.pushName,
+        remoteJid: msg.key.remoteJid,
+        remoteJidAlt: msg.key.remoteJidAlt,
+        participant: msg.key.participant,
+        participantAlt: msg.key.participantAlt,
+        ts: Date.now()
+    });
+    if (rawCache.size > 800) rawCache.delete(rawCache.keys().next().value);
+}
 
 function cacheMessage(remoteJid, msgId, data) {
     const key = `${remoteJid}:${msgId}`;
@@ -796,8 +810,22 @@ async function autoReconnectOnStartup() {
 initialize();
 setTimeout(autoReconnectOnStartup, 5000);
 
+// 🖼️ Bot images (menu eka witharak wenama image ekak use karanawa - menuImage)
+const BOT_IMAGES = [
+    'https://cloud.laksidu.site/stream/coNOXYjWqD/IMG-20260929-WA1350.jpg',
+    'https://cloud.laksidu.site/stream/w2M1YwqSMp/IMG-20260929-WA7000.jpg',
+    'https://cloud.laksidu.site/stream/aHdIQEq804/IMG-20260929-WA4539.jpg',
+    'https://cloud.laksidu.site/stream/LWsBZ1wzUC/IMG-20260929-WA0563.jpg',
+    'https://cloud.laksidu.site/stream/AjvgPH44oY/IMG-20260929-WA8438.jpg'
+];
+function pickBotImage(sc) {
+    const custom = sc && sc.BOT_IMAGE;
+    if (custom && custom !== config.BOT_IMAGE) return custom; // .set BOT_IMAGE kala nam eka
+    return BOT_IMAGES[Math.floor(Math.random() * BOT_IMAGES.length)];
+}
+
 function formatMessage(title, content, footer) {
-    return `*${title}*\n\n${content}\n\n> *${footer}*`;
+    return `╭━━━━━━━━━━━━━━━━━━━╮\n┃ ✨ *${title}* ✨\n╰━━━━━━━━━━━━━━━━━━━╯\n\n${content}\n\n━━━━━━━━━━━━━━━━━━━\n> 🎭 *${footer}* 🎭`;
 }
 
 function getSriLankaTimestamp() {
@@ -999,20 +1027,62 @@ async function setupCommandHandlers(socket, number) {
             return;
         }
 
-        // 🆕 ANTI-DELETE: kawruth message ekak delete kalada balala, thiyenawa nam ownerta yawanawa
+        // 🆕 ANTI-DELETE: delete kale kawuda / eka yawwe kawuda kiyala penawa
         if (msg.message.protocolMessage && (msg.message.protocolMessage.type === 0 || msg.message.protocolMessage.type === 'REVOKE')) {
             try {
-                if (sessionConfig.ANTI_DELETE === 'true') {
-                    const revokedJid = msg.key.remoteJid;
+                if (sessionConfig.ANTI_DELETE === 'true' && !msg.key.fromMe) {
+                    const chatJid = msg.key.remoteJid;
                     const deletedId = msg.message.protocolMessage.key?.id;
-                    const cacheKey = `${revokedJid}:${deletedId}`;
-                    const cached = messageCache.get(cacheKey);
-                    if (cached && cached.text) {
+                    const ck = `${chatJid}:${deletedId}`;
+                    const raw = rawCache.get(ck);
+                    const cachedTxt = messageCache.get(ck);
+                    if (raw || cachedTxt) {
+                        const numOf = (j) => String(j || '').split('@')[0].split(':')[0];
+                        const pn = (j, alt) => (alt && String(alt).endsWith('@s.whatsapp.net')) ? numOf(alt) : numOf(j);
+                        const isGrp = chatJid.endsWith('@g.us');
+
+                        const sentBy = raw
+                            ? (isGrp ? pn(raw.participant, raw.participantAlt) : pn(raw.remoteJid, raw.remoteJidAlt))
+                            : (cachedTxt?.senderNumber || 'unknown');
+                        const deletedBy = isGrp
+                            ? pn(msg.key.participant, msg.key.participantAlt)
+                            : pn(chatJid, msg.key.remoteJidAlt);
+
+                        let chatName = 'Private Chat';
+                        if (isGrp) {
+                            try { chatName = (await socket.groupMetadata(chatJid)).subject || 'Group'; } catch { chatName = 'Group'; }
+                        }
+
+                        const inner = raw ? unwrap(raw.msg.message) : {};
+                        const typeKey = Object.keys(inner).find(k => k !== 'messageContextInfo') || 'text';
+                        const typeName = typeKey.replace('Message', '').replace('extendedText', 'text').replace('conversation', 'text');
+                        const body = cachedTxt?.text
+                            || inner.conversation || inner.extendedTextMessage?.text
+                            || inner.imageMessage?.caption || inner.videoMessage?.caption || '';
+
                         const ownerJid = jidNormalizedUser(socket.user.id);
                         await socket.sendMessage(ownerJid, {
-                            text: `🗑️ *Deleted Message Recovered*\n\n👤 *From:* ${cached.senderNumber}\n💬 *Chat:* ${revokedJid}\n\n📩 *Message:*\n${cached.text}`
+                            text:
+`╭━━━〔 🗑️ *𝗔𝗡𝗧𝗜 𝗗𝗘𝗟𝗘𝗧𝗘* 🗑️ 〕━━━╮
+┃
+┃ 🚫 *Deleted By :* wa.me/${deletedBy}
+┃ 📤 *Sent By    :* wa.me/${sentBy}${raw?.pushName ? ` (${raw.pushName})` : ''}
+┃ 💬 *Chat       :* ${chatName}
+┃ 📎 *Type       :* ${typeName}
+┃ 🕒 *Time       :* ${getSriLankaTimestamp()}
+┃
+╰━━━━━━━━━━━━━━━━━━━━╯${body ? `\n\n📩 *Message:*\n${body}` : ''}
+
+> 🎭 *SHAGGY XMD* 🎭`
                         });
-                        messageCache.delete(cacheKey);
+
+                        // media nam original eka forward karanawa
+                        if (raw && typeName !== 'text' && typeName !== 'protocol') {
+                            try { await socket.sendMessage(ownerJid, { forward: raw.msg }); }
+                            catch (fwdErr) { console.error('AntiDelete forward failed:', fwdErr.message); }
+                        }
+                        messageCache.delete(ck);
+                        rawCache.delete(ck);
                     }
                 }
             } catch (adErr) {
@@ -1020,6 +1090,11 @@ async function setupCommandHandlers(socket, number) {
             }
             return;
         }
+
+        // 🆕 anti-delete: hama message ekakma (media ekath) cache karanawa
+        try {
+            if (!msg.key.fromMe && msg.message && !msg.message.protocolMessage) cacheRaw(msg);
+        } catch { /* ignore */ }
 
         let text = '';
         if (msg.message.conversation) {
@@ -1104,8 +1179,92 @@ async function setupCommandHandlers(socket, number) {
         try {
             switch (command) {
                 // ✅ ඔයාගේ cases ටික මෙතනට එනවා
+            case 'csong': {
+                // .csong <channel link>, <song name>  -> song eka channel ekata post karanawa (owner witharai)
+                if (!isOwner) {
+                    return await socket.sendMessage(sender, { text: '❌ *Owner witharai meka use karanna puluwan.*' }, { quoted: msg });
+                }
+                const csRaw = args.join(' ');
+                const csComma = csRaw.indexOf(',');
+                if (csComma === -1 || !csRaw.slice(0, csComma).trim() || !csRaw.slice(csComma + 1).trim()) {
+                    return await socket.sendMessage(sender, {
+                        text: `❌ *Use karana widiya:*\n\n\`${sessionConfig.PREFIX || '.'}csong <channel link>, <song name>\`\n\n*Example:*\n${sessionConfig.PREFIX || '.'}csong https://whatsapp.com/channel/0029VaXXXXXXX, Lelena\n\n_Bot number eka channel eke admin/owner wela inna one._`
+                    }, { quoted: msg });
+                }
+                const csLink = csRaw.slice(0, csComma).trim();
+                const csQuery = csRaw.slice(csComma + 1).trim();
+
+                try {
+                    await socket.sendMessage(sender, { react: { text: '🔎', key: msg.key } });
+
+                    // 1) channel eka hoyaganna
+                    let channelJid = null, channelName = 'Channel';
+                    if (/@newsletter$/.test(csLink)) {
+                        channelJid = csLink;
+                    } else {
+                        const codeM = csLink.match(/channel\/([A-Za-z0-9_-]+)/);
+                        if (!codeM) throw new Error('Channel link eka waradi (whatsapp.com/channel/... link ekak denna)');
+                        const meta = await socket.newsletterMetadata('invite', codeM[1]);
+                        if (!meta?.id) throw new Error('Channel eka hoyaganna baha');
+                        channelJid = meta.id;
+                        channelName = meta.name || meta.thread_metadata?.name?.text || 'Channel';
+                    }
+
+                    // 2) song eka hoyaganna
+                    const csRes = await yts(csQuery);
+                    const song = csRes.videos?.[0];
+                    if (!song) throw new Error(`"${csQuery}" kiyana song eka hamu una na`);
+
+                    await socket.sendMessage(sender, { text: `⏳ *${song.title}*\n_Download karala ${channelName} ekata post karanawa..._` }, { quoted: msg });
+
+                    // 3) mp3 download link eka
+                    const csApi = `${config.API_MAIN_URL}/api/ytmp3?url=https://youtu.be/${song.videoId}&api_key=${config.API_KEY}`;
+                    const csDl = await axios.get(csApi, { timeout: 120000 });
+                    if (csDl.data?.status !== 'success') throw new Error(csDl.data?.message || 'Song API error');
+                    const mp3Url = csDl.data.data.download_url;
+                    const songTitle = csDl.data.data.title || song.title;
+                    const thumb = csDl.data.data.thumbnail || song.thumbnail;
+
+                    const audioBuf = Buffer.from((await axios.get(mp3Url, { responseType: 'arraybuffer', timeout: 120000, maxContentLength: Infinity })).data);
+                    if (audioBuf.length < 50 * 1024) throw new Error('Song file eka waradi (godak podi)');
+
+                    // 4) lassana description ekak ekka channel ekata post
+                    const caption =
+`╭━━━〔 🎧 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗠𝗨𝗦𝗜𝗖* 🎧 〕━━━╮
+┃
+┃ 🎵 *Title*     : _${songTitle}_
+┃ 🎤 *Artist*    : _${song.author?.name || 'N/A'}_
+┃ ⏱️ *Duration*  : _${song.timestamp || 'N/A'}_
+┃ 👀 *Views*     : _${song.views?.toLocaleString() || 'N/A'}_
+┃ 📅 *Published* : _${song.ago || 'N/A'}_
+┃
+╰━━━━━━━━━━━━━━━━━━━━╯
+
+🎶 _Headphones dala rasa wind wenna_ 🎧
+👇 *Song eka pahala thiyenawa* 👇
+
+❤️ *React karanna* | 🔁 *Share karanna*
+
+> 🎭 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 🎭`;
+
+                    await socket.sendMessage(channelJid, { image: { url: thumb }, caption });
+                    await socket.sendMessage(channelJid, { audio: audioBuf, mimetype: 'audio/mpeg', ptt: false });
+
+                    await socket.sendMessage(sender, { react: { text: '✅', key: msg.key } });
+                    await socket.sendMessage(sender, {
+                        text: `✅ *Channel ekata post kala!*\n\n🎵 ${songTitle}\n📢 ${channelName}`
+                    }, { quoted: msg });
+                } catch (csErr) {
+                    console.error('[csong] error:', csErr.message);
+                    await socket.sendMessage(sender, { react: { text: '❌', key: msg.key } }).catch(() => {});
+                    let hint = '';
+                    if (/forbidden|not.?authorized|401|403|admin|permission/i.test(csErr.message)) hint = '\n\n_Bot number eka meka channel eke admin/owner nemei wage._';
+                    await socket.sendMessage(sender, { text: `❌ *CSONG Error:* ${csErr.message}${hint}` }, { quoted: msg });
+                }
+                break;
+            }
+
             case 'song':
-            case 'csong':
     if (!args.length) {
         await socket.sendMessage(sender, {
             text: '❌ ERROR\n\n*Need YouTube URL or Song Title*'
@@ -1372,7 +1531,7 @@ Failed to process TikTok request: ${error.message}`
 case 'cinesubz':
     if (!args.length) {
         await socket.sendMessage(sender, {
-            image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image:  { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර චිත්‍රපටයේ හෝ TV series එකේ නම ලබාදෙන්න! උදා: .cinesubz batman*',
@@ -1391,7 +1550,7 @@ case 'cinesubz':
 
         if (!searchData.status || !searchData.results || searchData.results.length === 0) {
             await socket.sendMessage(sender, {
-                image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image:  { url: pickBotImage(sessionConfig) },
                 caption: formatMessage(
                     '❌ NO RESULTS',
                     '*cinesubz හි චිත්‍රපට හමුවෙන්නේ නැත! 😞*',
@@ -1438,7 +1597,7 @@ case 'cinesubz':
                 const choice = parseInt(messageType) - 1;
                 if (isNaN(choice) || choice < 0 || choice >= cinezubResults.length) {
                     await socket.sendMessage(sender, {
-                        image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                        image:  { url: pickBotImage(sessionConfig) },
                         caption: formatMessage(
                             '❌ INVALID SELECTION',
                             `*වැරදි අංකයක්! 1-${cinezubResults.length} අතර තෝරන්න! 😕*`,
@@ -1544,7 +1703,7 @@ case 'cinesubz':
 
                                 if (isNaN(seasonNum) || seasonNum < 0 || seasonNum >= seasonsArray.length) {
                                     await socket.sendMessage(sender, {
-                                        image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                                        image:  { url: pickBotImage(sessionConfig) },
                                         caption: formatMessage(
                                             '❌ INVALID SELECTION',
                                             `*වැරදි අංකයක්! 1-${seasonsArray.length} අතර තෝරන්න!*`,
@@ -1591,7 +1750,7 @@ case 'cinesubz':
 
                                         if (isNaN(choiceNum) || choiceNum < 1 || choiceNum > selectedSeason.episodes.length) {
                                             await socket.sendMessage(sender, {
-                                                image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                                                image:  { url: pickBotImage(sessionConfig) },
                                                 caption: formatMessage(
                                                     '❌ INVALID SELECTION',
                                                     `*වැරදි අංකයක්! 1-${selectedSeason.episodes.length} අතර තෝරන්න!*`,
@@ -1654,7 +1813,7 @@ case 'cinesubz':
 
                                                     if (isNaN(qualityNum) || qualityNum < 0 || qualityNum >= episodeDownloadLinks.length) {
                                                         await socket.sendMessage(sender, {
-                                                            image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                                                            image:  { url: pickBotImage(sessionConfig) },
                                                             caption: formatMessage(
                                                                 '❌ INVALID SELECTION',
                                                                 `*වැරදි අංකයක්! 1-${episodeDownloadLinks.length} අතර තෝරන්න!*`,
@@ -1710,7 +1869,7 @@ ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`
                                                     } catch (downloadError) {
                                                         console.error('Download error:', downloadError);
                                                         await socket.sendMessage(sender, {
-                                                            image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                                                            image:  { url: pickBotImage(sessionConfig) },
                                                             caption: formatMessage(
                                                                 '❌ DOWNLOAD ERROR',
                                                                 `*Download link එක ලබාගැනීමේ දෝෂයක්.*\n${downloadError.message}`,
@@ -1731,7 +1890,7 @@ ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`
                                         } catch (error) {
                                             console.error('Error fetching episode links:', error);
                                             await socket.sendMessage(sender, {
-                                                image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                                                image:  { url: pickBotImage(sessionConfig) },
                                                 caption: formatMessage(
                                                     '❌ ERROR',
                                                     `*Download links ලබාගැනීමේ දෝෂයක්*\n${error.message}`,
@@ -1754,7 +1913,7 @@ ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`
                     } catch (tvShowError) {
                         console.error('TV Show error:', tvShowError);
                         await socket.sendMessage(sender, {
-                            image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                            image:  { url: pickBotImage(sessionConfig) },
                             caption: formatMessage(
                                 '❌ ERROR',
                                 `*TV series details ලබාගැනීමේ දෝෂයක්*\n${tvShowError.message}`,
@@ -1783,7 +1942,7 @@ ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`
 
                         if (validDownloads.length === 0) {
                             await socket.sendMessage(sender, {
-                                image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                                image:  { url: pickBotImage(sessionConfig) },
                                 caption: formatMessage(
                                     '❌ NO DOWNLOADS',
                                     '*මෙම චිත්‍රපටය සඳහා බාගත කිරීමේ link නොමැත!*',
@@ -1848,7 +2007,7 @@ ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`
 
                                 if (isNaN(choiceNum) || choiceNum < 0 || choiceNum >= validDownloads.length) {
                                     await socket.sendMessage(sender, {
-                                        image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                                        image:  { url: pickBotImage(sessionConfig) },
                                         caption: formatMessage(
                                             '❌ INVALID SELECTION',
                                             `*වැරදි අංකයක්! 1-${validDownloads.length} අතර තෝරන්න!*`,
@@ -1904,7 +2063,7 @@ ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`
                                 } catch (downloadError) {
                                     console.error('Download link error:', downloadError);
                                     await socket.sendMessage(sender, {
-                                        image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                                        image:  { url: pickBotImage(sessionConfig) },
                                         caption: formatMessage(
                                             '❌ DOWNLOAD ERROR',
                                             `*Download link එක ලබාගැනීමේ දෝෂයක්.*\n${downloadError.message}`,
@@ -1923,7 +2082,7 @@ ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`
                     } catch (detailsError) {
                         console.error('Details error:', detailsError);
                         await socket.sendMessage(sender, {
-                            image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                            image:  { url: pickBotImage(sessionConfig) },
                             caption: formatMessage(
                                 '❌ ERROR',
                                 `*Details ලබාගැනීමේ දෝෂයක්*\n${detailsError.message}`,
@@ -1941,7 +2100,7 @@ ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`
     } catch (error) {
         console.error('Cinezub command error:', error);
         await socket.sendMessage(sender, {
-            image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image:  { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 `*දෝෂයක් ඇතිවුණා:* ${error.message || 'Unknown error'}`,
@@ -1954,7 +2113,7 @@ ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`
                 case 'sinhalasub':
     if (!args.length) {
         await socket.sendMessage(sender, {
-             image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE},
+             image: { url: pickBotImage(sessionConfig)},
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර චිත්‍රපටයේ නම ලබාදෙන්න! උදා: .sinhalasub spider*',
@@ -2012,7 +2171,7 @@ ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`
 
         if (!searchData.status || !searchData.data?.results || searchData.data.results.length === 0) {
             await socket.sendMessage(sender, {
-                 image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE},
+                 image: { url: pickBotImage(sessionConfig)},
                 caption: formatMessage(
                     '❌ NO RESULTS',
                     '*චිත්‍රපට හමුවෙන්නේ නැත! 😞*',
@@ -2036,7 +2195,7 @@ ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`
         listText += `╰──────────●➤\n> ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`;
 
         const sentMsg = await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE},
+            image: { url: pickBotImage(sessionConfig)},
             caption: listText
         }, { quoted: msg });
 
@@ -2076,7 +2235,7 @@ ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`
                 const choice = parseInt(messageType) - 1;
                 if (isNaN(choice) || choice < 0 || choice >= movies.length) {
                     await socket.sendMessage(sender, {
-                         image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE},
+                         image: { url: pickBotImage(sessionConfig)},
                         caption: formatMessage(
                             '❌ INVALID SELECTION',
                             `*වැරදි අංකයක්! 1-${movies.length} අතර තෝරන්න! 😕*`,
@@ -2111,7 +2270,7 @@ ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`
 
                     if (videoDownloads.length === 0) {
                         await socket.sendMessage(sender, {
-                             image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE},
+                             image: { url: pickBotImage(sessionConfig)},
                             caption: formatMessage(
                                 '❌ NO DOWNLOADS',
                                 '*Pixeldrain බාගත කිරීම් නොමැත!*',
@@ -2140,7 +2299,7 @@ ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`
                     );
 
                     const infoMsg = await socket.sendMessage(sender, {
-                        image: { url: movieInfo.poster || selectedMovie.poster || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                        image: { url: movieInfo.poster || selectedMovie.poster || pickBotImage(sessionConfig) },
                         caption: detailsCaption
                     }, { quoted: replyMek });
 
@@ -2191,7 +2350,7 @@ ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
                             if (isNaN(choiceNum) || choiceNum < 0 || choiceNum >= videoDownloads.length) {
                                 await socket.sendMessage(sender, {
-                                     image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE},
+                                     image: { url: pickBotImage(sessionConfig)},
                                     caption: formatMessage(
                                         '❌ INVALID SELECTION',
                                         `*වැරදි අංකයක්! 1-${videoDownloads.length} අතර තෝරන්න!*`,
@@ -2267,7 +2426,7 @@ ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
                             } catch (downloadError) {
                                 console.error('Download link error:', downloadError);
                                 await socket.sendMessage(sender, {
-                                     image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE},
+                                     image: { url: pickBotImage(sessionConfig)},
                                     caption: formatMessage(
                                         '❌ DOWNLOAD ERROR',
                                         `*Download link එක ලබාගැනීමේ දෝෂයක්.*\nError: ${downloadError.message}`,
@@ -2295,7 +2454,7 @@ ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
                 } catch (infoError) {
                     console.error('Movie info error:', infoError);
                     await socket.sendMessage(sender, {
-                         image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE},
+                         image: { url: pickBotImage(sessionConfig)},
                         caption: formatMessage(
                             '❌ ERROR',
                             `*Movie details ලබාගැනීමේ දෝෂයක්:* ${infoError.message}`,
@@ -2325,7 +2484,7 @@ ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
         clearAllSinhalasubListeners();
         await socket.sendMessage(sender, {
-             image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE},
+             image: { url: pickBotImage(sessionConfig)},
             caption: formatMessage(
                 '❌ ERROR',
                 `*දෝෂයක් ඇතිවුණා:* ${error.message || 'Unknown error'}`,
@@ -2351,7 +2510,7 @@ case 'help': {
         const ramMB = (process.memoryUsage().rss / 1024 / 1024).toFixed(0);
         const botName = sessionConfig.BOT_NAME || config.BOT_NAME || 'SHAGGY XMD';
         const footer = sessionConfig.BOT_FOOTER || config.BOT_FOOTER;
-        const menuImage = { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE };
+        const menuImage = { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE }; // menu image eka wenas karanne na
 
         // ── Categories (every command listed here has a real case) ──
         const categories = {
@@ -2387,6 +2546,7 @@ case 'help': {
                 emoji: '⬇️', title: 'DOWNLOADERS',
                 cmds: [
                     ['song', 'Song / YouTube audio'],
+                    ['csong', 'Song -> channel post (owner)'],
                     ['yt', 'YouTube video / audio'],
                     ['tiktok', 'TikTok (no watermark)'],
                     ['mediafire', 'MediaFire files  🆕'],
@@ -2589,7 +2749,7 @@ case 'alive': {
     const P = sessionConfig.PREFIX || config.PREFIX || '.';
     const footer = sessionConfig.BOT_FOOTER || config.BOT_FOOTER;
     await socket.sendMessage(sender, {
-        image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+        image: { url: pickBotImage(sessionConfig) },
         caption: formatMessage(
             '✅ I AM ALIVE',
             `⚡ *Uptime :* ${upStr}\n🔣 *Prefix :* ${P}\n🌐 *Mode :* ${sessionConfig.MODE || config.MODE}\n\n💬 Type *${P}menu* to see all commands`,
@@ -2602,7 +2762,7 @@ case 'alive': {
 case 'singrup':
     if (!args.length || !args.join(' ').includes(',')) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර group link සහ චිත්‍රපටයේ නම ලබාදෙන්න!*\n*උදා: .singrup https://chat.whatsapp.com/xxxxx,spider*',
@@ -2620,7 +2780,7 @@ case 'singrup':
 
     if (!groupLinkInput || !movieQuery) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*Group link සහ movie name දෙකම ලබාදෙන්න!*',
@@ -2647,7 +2807,7 @@ case 'singrup':
     } catch (groupErr) {
         console.error('Group link error:', groupErr);
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ GROUP ERROR',
                 `*Group link එක වැරදියි හෝ bot ට access නැහැ!*\nError: ${groupErr.message}`,
@@ -2695,7 +2855,7 @@ case 'singrup':
 
         if (!searchData.status || !searchData.data?.results || searchData.data.results.length === 0) {
             await socket.sendMessage(sender, {
-                image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image: { url: pickBotImage(sessionConfig) },
                 caption: formatMessage(
                     '❌ NO RESULTS',
                     '*චිත්‍රපට හමුවෙන්නේ නැත! 😞*',
@@ -2719,7 +2879,7 @@ case 'singrup':
         listText += `╰──────────●➤\n> ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`;
 
         const sentMsg = await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: listText
         }, { quoted: msg });
 
@@ -2746,7 +2906,7 @@ case 'singrup':
                 const choice = parseInt(messageType) - 1;
                 if (isNaN(choice) || choice < 0 || choice >= movies.length) {
                     await socket.sendMessage(sender, {
-                        image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                        image: { url: pickBotImage(sessionConfig) },
                         caption: formatMessage(
                             '❌ INVALID SELECTION',
                             `*වැරදි අංකයක්! 1-${movies.length} අතර තෝරන්න! 😕*`,
@@ -2778,7 +2938,7 @@ case 'singrup':
 
                     if (videoDownloads.length === 0) {
                         await socket.sendMessage(sender, {
-                            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                            image: { url: pickBotImage(sessionConfig) },
                             caption: formatMessage(
                                 '❌ NO DOWNLOADS',
                                 '*Pixeldrain බාගත කිරීම් නොමැත!*',
@@ -2807,7 +2967,7 @@ case 'singrup':
                     );
 
                     const infoMsg = await socket.sendMessage(sender, {
-                        image: { url: movieInfo.poster || selectedMovie.poster || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                        image: { url: movieInfo.poster || selectedMovie.poster || pickBotImage(sessionConfig) },
                         caption: detailsCaption
                     }, { quoted: replyMek });
 
@@ -2845,7 +3005,7 @@ ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
                             if (isNaN(choiceNum) || choiceNum < 0 || choiceNum >= videoDownloads.length) {
                                 await socket.sendMessage(sender, {
-                                    image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                                    image: { url: pickBotImage(sessionConfig) },
                                     caption: formatMessage(
                                         '❌ INVALID SELECTION',
                                         `*වැරදි අංකයක්! 1-${videoDownloads.length} අතර තෝරන්න!*`,
@@ -2890,7 +3050,7 @@ ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
                                 // 1. Send movie post (image + details) to group
                                 await socket.sendMessage(targetGroupJid, {
-                                    image: { url: movieInfo.poster || selectedMovie.poster || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                                    image: { url: movieInfo.poster || selectedMovie.poster || pickBotImage(sessionConfig) },
                                     caption: detailsCaption
                                 });
 
@@ -2915,7 +3075,7 @@ ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
                             } catch (downloadError) {
                                 console.error('Download link error:', downloadError);
                                 await socket.sendMessage(sender, {
-                                    image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                                    image: { url: pickBotImage(sessionConfig) },
                                     caption: formatMessage(
                                         '❌ DOWNLOAD ERROR',
                                         `*Download link එක ලබාගැනීමේ දෝෂයක්.*\nError: ${downloadError.message}`,
@@ -2941,7 +3101,7 @@ ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
                 } catch (infoError) {
                     console.error('Movie info error:', infoError);
                     await socket.sendMessage(sender, {
-                        image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                        image: { url: pickBotImage(sessionConfig) },
                         caption: formatMessage(
                             '❌ ERROR',
                             `*Movie details ලබාගැනීමේ දෝෂයක්:* ${infoError.message}`,
@@ -2968,7 +3128,7 @@ ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
         console.error('Movie command error:', error);
         clearAllSingrupListeners();
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 `*දෝෂයක් ඇතිවුණා:* ${error.message || 'Unknown error'}`,
@@ -2983,7 +3143,7 @@ case 'paper':
 case 'pastpapers': {
     if (!args.length) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර සොයන Paper එකේ නම ලබාදෙන්න! උදා: .papers Mathematics*',
@@ -3024,7 +3184,7 @@ case 'pastpapers': {
 
         if (!searchData.success || !searchData.data || searchData.data.length === 0) {
             await socket.sendMessage(sender, {
-                image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image: { url: pickBotImage(sessionConfig) },
                 caption: formatMessage(
                     '❌ NO RESULTS',
                     `*"${query}" සඳහා කිසිදු Paper එකක් හමු නොවීය!*`,
@@ -3046,7 +3206,7 @@ case 'pastpapers': {
         listText += `╰──────────●➤\n> ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
         const searchMsg = await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: listText
         }, { quoted: msg });
 
@@ -3142,7 +3302,7 @@ case 'dinkamovieslk': {
 
     if (!args.length) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '🎬 DINKAMOVIES SEARCH',
                 '*කරුණාකර චිත්‍රපටයේ නම ලබාදෙන්න!*\n\n*📌 Usage:* `.dinka ben 10`\n*📌 Usage:* `.dinka the croods`',
@@ -3375,7 +3535,7 @@ case 'dinkamovieslk': {
         const searchData = searchRes.data;
         if (!searchData.status || !searchData.data || searchData.data.length === 0) {
             await socket.sendMessage(sender, {
-                image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image: { url: pickBotImage(sessionConfig) },
                 caption: formatMessage(
                     '❌ NO RESULTS',
                     `*"${dinkaQuery}"* සඳහා කිසිදු ප්‍රතිඵලයක් හමු නොවීය!`,
@@ -3395,7 +3555,7 @@ case 'dinkamovieslk': {
         listText += `\n📌 _Reply with number to download!_${DEFAULT_FOOTER}`;
 
         const searchMsg = await socket.sendMessage(sender, {
-            image: { url: dinkaList[0].poster || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: dinkaList[0].poster || pickBotImage(sessionConfig) },
             caption: listText
         }, { quoted: msg });
 
@@ -3466,7 +3626,7 @@ case 'dinkamovieslk': {
                 infoText += `\n👉 *බාගත කිරීමට අදාළ අංකය Reply කරන්න.*\n_✓ = Document • ⚠️ = 2GB+_`;
 
                 const infoMsg = await socket.sendMessage(sender, {
-                    image: { url: mediaData.poster || chosenItem.poster || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                    image: { url: mediaData.poster || chosenItem.poster || pickBotImage(sessionConfig) },
                     caption: infoText
                 }, { quoted: replyMek });
 
@@ -3590,7 +3750,7 @@ case 'mhbd':
 case 'bw': {
     if (!args.length) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර Movie නම ලබාදෙන්න! උදා: .mhbd DC*',
@@ -3765,7 +3925,7 @@ case 'bw': {
         const searchData = searchRes.data;
         if (!searchData.status || !searchData.data?.length) {
             await socket.sendMessage(sender, {
-                image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image: { url: pickBotImage(sessionConfig) },
                 caption: formatMessage(
                     '❌ NO RESULTS',
                     '*කිසිදු Movie එකක් හමු නොවීය!*',
@@ -3792,7 +3952,7 @@ case 'bw': {
         listText += `╰──────────●➤\n> ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
         const searchMsg = await socket.sendMessage(sender, {
-            image: { url: results[0].image || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: results[0].image || pickBotImage(sessionConfig) },
             caption: listText
         }, { quoted: msg });
 
@@ -4029,7 +4189,7 @@ case 'cineverse':
 case 'cv': {
     if (!args.length) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර Movie/Series නම ලබාදෙන්න! උදා: .movie Vikings*',
@@ -4124,7 +4284,7 @@ case 'cv': {
         const searchData = searchRes.data;
         if (!searchData.status || !searchData.data?.length) {
             await socket.sendMessage(sender, {
-                image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image: { url: pickBotImage(sessionConfig) },
                 caption: formatMessage(
                     '❌ NO RESULTS',
                     '*කිසිදු Movie/Series එකක් හමු නොවීය!*',
@@ -4144,7 +4304,7 @@ case 'cv': {
         listText += `╰──────────●➤\n> ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
         const searchMsg = await socket.sendMessage(sender, {
-            image: { url: results[0].image || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: results[0].image || pickBotImage(sessionConfig) },
             caption: listText
         }, { quoted: msg });
 
@@ -4605,7 +4765,7 @@ case 'plk': {
 
     if (!args.length) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර චිත්‍රපටයේ නම ලබාදෙන්න! උදා: .piratelk pushpa*',
@@ -4825,7 +4985,7 @@ case 'mf': {
 
     if (!mfUrl) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '📁 MEDIAFIRE DOWNLOADER',
                 `*MediaFire link ekak denna!*\n\n*📌 Usage:* \`${MF_PREFIX}mediafire <link>\`\n\n*Example:*\n\`${MF_PREFIX}mf https://www.mediafire.com/file/xxxxxxxx/file.zip/file\``,
@@ -4986,7 +5146,7 @@ case 'gdl': {
 
     if (!args.length) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර Google Drive link එක ලබාදෙන්න!*\n\n*📌 Usage:* `.gdrive <drive-link>`\n\n*Example:*\n`.gdrive https://drive.google.com/file/d/1pZ2rqEVkUp8g190uvLgjyrnHFk5qzlo5/view`',
@@ -5003,7 +5163,7 @@ case 'gdl': {
         !inputUrl.includes('drive.usercontent.google.com') && 
         !inputUrl.includes('docs.google.com')) {
         return socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ INVALID URL',
                 '*කරුණාකර වලංගු Google Drive link එකක් ලබාදෙන්න!*\n\n*📌 Supported:*\n• `drive.google.com/file/d/ID/view`\n• `docs.google.com/uc?export=download&id=ID`',
@@ -6724,7 +6884,7 @@ case 'tamilmv':
 case 'tamil': {
     if (!args.length) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර චිත්‍රපටයේ නම ලබාදෙන්න! උදා: .tamilmv Maharaja*',
@@ -6808,7 +6968,7 @@ case 'tamil': {
 
         if (!searchData.status || results.length === 0) {
             await socket.sendMessage(sender, {
-                image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image: { url: pickBotImage(sessionConfig) },
                 caption: formatMessage('❌ NO RESULTS', '*කිසිදු චිත්‍රපටයක් හමු නොවීය!*', `${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`)
             }, { quoted: msg });
             break;
@@ -6824,7 +6984,7 @@ case 'tamil': {
         listText += `╰──────────●➤\n> ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
         const searchMsg = await socket.sendMessage(sender, {
-            image: { url: movieList[0].image || movieList[0].poster || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: movieList[0].image || movieList[0].poster || pickBotImage(sessionConfig) },
             caption: listText
         }, { quoted: msg });
 
@@ -6877,7 +7037,7 @@ case 'tamil': {
                 infoText += `\n👉 *බාගත කිරීමට අදාළ අංකය Reply කරන්න.*\n_✓ = Document • 🔗 = Link only • ⚠️ = 2GB+_`;
 
                 const infoMsg = await socket.sendMessage(sender, {
-                    image: { url: movieData.image || movieData.poster || chosenMovie.image || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                    image: { url: movieData.image || movieData.poster || chosenMovie.image || pickBotImage(sessionConfig) },
                     caption: infoText
                 }, { quoted: replyMek });
 
@@ -7011,7 +7171,7 @@ case 'cinemx':
 case 'cmx': {
     if (!args.length) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර චිත්‍රපටයේ නම ලබාදෙන්න! උදා: .cinemx Vishwanath and Sons*',
@@ -7099,7 +7259,7 @@ case 'cmx': {
 
         if (!searchData.status || results.length === 0) {
             await socket.sendMessage(sender, {
-                image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image: { url: pickBotImage(sessionConfig) },
                 caption: formatMessage('❌ NO RESULTS', '*කිසිදු චිත්‍රපටයක් හමු නොවීය!*', `${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`)
             }, { quoted: msg });
             break;
@@ -7115,7 +7275,7 @@ case 'cmx': {
         listText += `╰──────────●➤\n> ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
         const searchMsg = await socket.sendMessage(sender, {
-            image: { url: list[0].image || list[0].original_image || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: list[0].image || list[0].original_image || pickBotImage(sessionConfig) },
             caption: listText
         }, { quoted: msg });
 
@@ -7194,7 +7354,7 @@ case 'cmx': {
                 infoText += `\n👉 *බාගත කිරීමට අදාළ අංකය Reply කරන්න.*\n_✓ = Video • 📝 = Subtitle • ⚠️ = 2GB+_`;
 
                 const infoMsg = await socket.sendMessage(sender, {
-                    image: { url: movie.image || chosen.image || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                    image: { url: movie.image || chosen.image || pickBotImage(sessionConfig) },
                     caption: infoText
                 }, { quoted: replyMek });
 
@@ -7335,7 +7495,7 @@ case 'vault': {
 
     if (!args.length) {
         return socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර search කිරීමට keyword එකක් දෙන්න!*\n\n*📌 Usage:* `.nethmv action movie`\n*📌 Usage:* `.nethmv spider*',
@@ -7426,7 +7586,7 @@ case 'vault': {
 
         if (!searchData.count || files.length === 0) {
             return socket.sendMessage(sender, {
-                image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image: { url: pickBotImage(sessionConfig) },
                 caption: formatMessage(
                     '❌ NO RESULTS',
                     `*"${searchQuery}"* සඳහා කිසිදු file එකක් හමු නොවීය!`,
@@ -7585,7 +7745,7 @@ case 'mm':
 case 'mmlk': {
     if (!args.length) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර චිත්‍රපටයේ නම ලබාදෙන්න! උදා: .moviemania 13 Days*',
@@ -7665,7 +7825,7 @@ case 'mmlk': {
 
         if (!searchData.status || results.length === 0) {
             await socket.sendMessage(sender, {
-                image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image: { url: pickBotImage(sessionConfig) },
                 caption: formatMessage('❌ NO RESULTS', '*කිසිදු චිත්‍රපටයක් හමු නොවීය!*', `${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`)
             }, { quoted: msg });
             break;
@@ -7681,7 +7841,7 @@ case 'mmlk': {
         listText += `╰──────────●➤\n> ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
         const searchMsg = await socket.sendMessage(sender, {
-            image: { url: list[0].poster || list[0].thumbnail || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: list[0].poster || list[0].thumbnail || pickBotImage(sessionConfig) },
             caption: listText
         }, { quoted: msg });
 
@@ -7745,7 +7905,7 @@ case 'mmlk': {
                 infoText += `\n👉 *බාගත කිරීමට අදාළ අංකය Reply කරන්න.*\n_✓ = Video • 📝 = Subtitle • ⚠️ = 2GB+_`;
 
                 const infoMsg = await socket.sendMessage(sender, {
-                    image: { url: movie.image || movie.poster || chosen.poster || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                    image: { url: movie.image || movie.poster || chosen.poster || pickBotImage(sessionConfig) },
                     caption: infoText
                 }, { quoted: replyMek });
 
@@ -8345,7 +8505,7 @@ case 'cartoon2':
 case 'sinhalacartoon': {
     if (!args.length) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර කාටූනයේ නම ලබාදෙන්න! උදා: .cartoon Ben 10*',
@@ -8397,7 +8557,7 @@ case 'sinhalacartoon': {
         const searchData = searchRes.data;
         if (!searchData.status || !searchData.data || searchData.data.length === 0) {
             await socket.sendMessage(sender, {
-                image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image: { url: pickBotImage(sessionConfig) },
                 caption: formatMessage(
                     '❌ NO RESULTS',
                     '*කිසිදු කාටූනයක් හමු නොවීය!*',
@@ -8416,7 +8576,7 @@ case 'sinhalacartoon': {
         listText += `╰──────────●➤\n> ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
         const searchMsg = await socket.sendMessage(sender, {
-            image: { url: cartoonList[0].image || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: cartoonList[0].image || pickBotImage(sessionConfig) },
             caption: listText
         }, { quoted: msg });
 
@@ -8571,7 +8731,7 @@ case 'chithra':
 case 'chmovie': {
     if (!args.length) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර චිත්‍රපටයේ නම ලබාදෙන්න! උදා: .chithrapata Vivaah*',
@@ -8626,7 +8786,7 @@ case 'chmovie': {
 
         if (allResults.length === 0) {
             await socket.sendMessage(sender, {
-                image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image: { url: pickBotImage(sessionConfig) },
                 caption: formatMessage('❌ NO RESULTS', '*කිසිදු චිත්‍රපටයක්/සිරිසක් හමු නොවීය!*', `${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`)
             }, { quoted: msg });
             break;
@@ -8642,7 +8802,7 @@ case 'chmovie': {
         listText += `╰──────────●➤\n> ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
         const searchMsg = await socket.sendMessage(sender, {
-            image: { url: list[0].thumbnail || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: list[0].thumbnail || pickBotImage(sessionConfig) },
             caption: listText
         }, { quoted: msg });
 
@@ -8979,7 +9139,7 @@ case 'dubzone':
 case 'dubzonesearch': {
     if (!args.length) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර සෙවිය යුතු DubZone චිත්‍රපටයේ නම ලබාදෙන්න! උදා: .dubzone The Lorax*',
@@ -9022,7 +9182,7 @@ case 'dubzonesearch': {
         const searchData = searchRes.data;
         if (!searchData.success || !searchData.results || searchData.results.length === 0) {
             await socket.sendMessage(sender, {
-                image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image: { url: pickBotImage(sessionConfig) },
                 caption: formatMessage(
                     '❌ NO RESULTS',
                     '*කිසිදු චිත්‍රපටයක් හමු නොවීය!*',
@@ -9041,7 +9201,7 @@ case 'dubzonesearch': {
         listText += `╰──────────●➤\n> ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
         const searchMsg = await socket.sendMessage(sender, {
-            image: { url: movieList[0].thumbnail || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: movieList[0].thumbnail || pickBotImage(sessionConfig) },
             caption: listText
         }, { quoted: msg });
 
@@ -9184,7 +9344,7 @@ case 'dubzonesearch': {
 case 'thenkiri': {
     if (!args.length) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර සෙවිය යුතු Movie එකේ හෝ TV Series එකේ නම ලබාදෙන්න! උදා: .thinkiri newborn*',
@@ -9223,7 +9383,7 @@ case 'thenkiri': {
         const searchData = searchRes.data;
         if (!searchData.status || !searchData.data || !searchData.data.results || searchData.data.results.length === 0) {
             await socket.sendMessage(sender, {
-                image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image: { url: pickBotImage(sessionConfig) },
                 caption: formatMessage(
                     '❌ NO RESULTS',
                     '*කිසිදු ප්‍රතිඵලයක් හමු නොවීය!*',
@@ -9246,7 +9406,7 @@ case 'thenkiri': {
         listText += `╰──────────●➤\n> ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
         const searchMsg = await socket.sendMessage(sender, {
-            image: { url: movieList[0].thumbnail || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: movieList[0].thumbnail || pickBotImage(sessionConfig) },
             caption: listText
         }, { quoted: msg });
 
@@ -9333,7 +9493,7 @@ case 'sinhalatop':
 case 'sinhalatopsearch': {
     if (!args.length) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර සෙවිය යුතු චිත්‍රපටයේ හෝ කතාමාලාවේ නම ලබාදෙන්න! උදා: .sinhalatop Alpha*',
@@ -9377,7 +9537,7 @@ case 'sinhalatopsearch': {
         const searchData = searchRes.data;
         if (!searchData.status || !searchData.data || searchData.data.length === 0) {
             await socket.sendMessage(sender, {
-                image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image: { url: pickBotImage(sessionConfig) },
                 caption: formatMessage(
                     '❌ NO RESULTS',
                     '*කිසිදු ප්‍රතිඵලයක් හමු නොවීය!*',
@@ -9396,7 +9556,7 @@ case 'sinhalatopsearch': {
         listText += `╰──────────●➤\n> ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
         const searchMsg = await socket.sendMessage(sender, {
-            image: { url: movieList[0].image || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: movieList[0].image || pickBotImage(sessionConfig) },
             caption: listText
         }, { quoted: msg });
 
@@ -9570,45 +9730,53 @@ case 'sdl': {
 }
                 case 'vv':
 case '❤️': {
-    const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
-    if (!quoted) {
-        await socket.sendMessage(sender, { text: '❌ කරුණාකර View Once ෆොටෝ එකකට හෝ Profile Picture එකකට රිප්ளை කර මේ කමාන්ඩ් එක භාවිත කරන්න!' }, { quoted: msg });
+    const ctxInfoVV = msg.message.extendedTextMessage?.contextInfo;
+    const quotedRawVV = ctxInfoVV?.quotedMessage;
+    if (!quotedRawVV) {
+        await socket.sendMessage(sender, { text: '❌ View Once photo / video / audio ekakata *reply* karala .vv kiyala danna.' }, { quoted: msg });
         break;
     }
 
     try {
         await socket.sendMessage(sender, { react: { text: '🔄', key: msg.key } });
 
-        // View Once හෝ සාමාන්‍ය මීඩියා ඩවුන්ලෝඩ් කර ගැනීම
-        let mediaMessage = quoted.imageMessage || quoted.videoMessage || quoted.viewOnceMessageV2?.message?.imageMessage || quoted.viewOnceMessageV2?.message?.videoMessage;
+        const qVV = unwrap(quotedRawVV); // ephemeral / viewOnce v1, v2, v2Extension okkoma ain karanawa
+        let mediaVV = null, typeVV = null;
+        for (const [k, t] of [['imageMessage', 'image'], ['videoMessage', 'video'], ['audioMessage', 'audio']]) {
+            if (qVV[k]) { mediaVV = qVV[k]; typeVV = t; break; }
+        }
 
-        if (mediaMessage) {
-            const stream = await downloadContentFromMessage(mediaMessage, mediaMessage.mimetype.includes('image') ? 'image' : 'video');
-            let buffer = Buffer.from([]);
-            for await (const chunk of stream) {
-                buffer = Buffer.concat([buffer, chunk]);
-            }
+        if (mediaVV) {
+            const streamVV = await downloadContentFromMessage(mediaVV, typeVV);
+            const chunksVV = [];
+            for await (const chunk of streamVV) chunksVV.push(chunk);
+            const bufferVV = Buffer.concat(chunksVV);
+            if (!bufferVV.length) throw new Error('Media eka download karanna baha (expire wela / already opened)');
 
-            const caption = mediaMessage.caption || '';
-            if (mediaMessage.mimetype.includes('image')) {
-                await socket.sendMessage(sender, { image: buffer, caption: `🔓 *View Once / DP Restored*\n\n${caption}` }, { quoted: msg });
+            const capVV = `🔓 *View Once Restored*\n${mediaVV.caption ? `\n${mediaVV.caption}\n` : ''}\n> 🎭 *SHAGGY XMD* 🎭`;
+            if (typeVV === 'image') {
+                await socket.sendMessage(sender, { image: bufferVV, caption: capVV }, { quoted: msg });
+            } else if (typeVV === 'video') {
+                await socket.sendMessage(sender, { video: bufferVV, caption: capVV, mimetype: mediaVV.mimetype || 'video/mp4' }, { quoted: msg });
             } else {
-                await socket.sendMessage(sender, { video: buffer, caption: `🔓 *View Once / DP Restored*\n\n${caption}` }, { quoted: msg });
+                await socket.sendMessage(sender, { audio: bufferVV, mimetype: mediaVV.mimetype || 'audio/mp4', ptt: !!mediaVV.ptt }, { quoted: msg });
             }
         } else {
-            // Profile Picture එකක් නම්
-            let targetJid = msg.message.extendedTextMessage.contextInfo.participant || sender;
-            let ppUrl;
+            // media nathnam - reply karapu kenage Profile Picture eka
+            const targetJidVV = ctxInfoVV.participant || sender;
+            let ppUrlVV;
             try {
-                ppUrl = await socket.profilePictureUrl(targetJid, 'image');
+                ppUrlVV = await socket.profilePictureUrl(targetJidVV, 'image');
             } catch {
-                ppUrl = 'https://i.ibb.co/31P1LkZ/placeholder.jpg';
+                throw new Error('Meka View Once media ekak nemei, Profile Picture ekakuth ganna baha.');
             }
-            await socket.sendMessage(sender, { image: { url: ppUrl }, caption: '👤 *Profile Picture*' }, { quoted: msg });
+            await socket.sendMessage(sender, { image: { url: ppUrlVV }, caption: '👤 *Profile Picture*\n\n> 🎭 *SHAGGY XMD* 🎭' }, { quoted: msg });
         }
         await socket.sendMessage(sender, { react: { text: '✅', key: msg.key } });
     } catch (err) {
-        await socket.sendMessage(sender, { text: `❌ දෝෂයක් ඇති විය: ${err.message}` }, { quoted: msg });
+        console.error('[vv] error:', err.message);
+        await socket.sendMessage(sender, { react: { text: '❌', key: msg.key } }).catch(() => {});
+        await socket.sendMessage(sender, { text: `❌ *VV Error:* ${err.message}` }, { quoted: msg });
     }
     break;
 }
@@ -9878,7 +10046,7 @@ case 'pupil': {
 
     if (!args.length) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර චිත්‍රපටයේ නම ලබාදෙන්න! උදා: .pupilmovie spider*',
@@ -9952,7 +10120,7 @@ case 'pupil': {
 
         if (!searchData.status || !searchData.data?.results || searchData.data.results.length === 0) {
             await socket.sendMessage(sender, {
-                image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image: { url: pickBotImage(sessionConfig) },
                 caption: formatMessage(
                     '❌ NO RESULTS',
                     '*කිසිදු චිත්‍රපටයක් හමු නොවීය!*',
@@ -9973,7 +10141,7 @@ case 'pupil': {
         listText += `\n📌 _Reply with number to download!_${DEFAULT_FOOTER}`;
 
         const sentMsg = await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: listText
         }, { quoted: msg });
 
@@ -9992,7 +10160,7 @@ case 'pupil': {
                 const choice = parseInt(messageType) - 1;
                 if (isNaN(choice) || choice < 0 || choice >= movies.length) {
                     return socket.sendMessage(sender, {
-                        image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                        image: { url: pickBotImage(sessionConfig) },
                         caption: formatMessage(
                             '❌ INVALID SELECTION',
                             `*වැරදි අංකයක්! 1-${movies.length} අතර තෝරන්න!*`,
@@ -10022,7 +10190,7 @@ case 'pupil': {
 
                     if (allDownloadLinks.length === 0) {
                         return socket.sendMessage(sender, {
-                            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                            image: { url: pickBotImage(sessionConfig) },
                             caption: formatMessage(
                                 '❌ NO DOWNLOADS',
                                 '*බාගත කිරීම් හමු නොවීය!*',
@@ -10053,7 +10221,7 @@ case 'pupil': {
                     detailsText += DEFAULT_FOOTER;
 
                     const infoMsg = await socket.sendMessage(sender, {
-                        image: { url: movieInfo.poster || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                        image: { url: movieInfo.poster || pickBotImage(sessionConfig) },
                         caption: detailsText
                     }, { quoted: replyMek });
 
@@ -10085,7 +10253,7 @@ case 'pupil': {
 
                             if (isNaN(choiceNum) || choiceNum < 0 || choiceNum >= processedLinks.length) {
                                 return socket.sendMessage(sender, {
-                                    image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                                    image: { url: pickBotImage(sessionConfig) },
                                     caption: formatMessage(
                                         '❌ INVALID SELECTION',
                                         `*වැරදි අංකයක්! 1-${processedLinks.length} අතර තෝරන්න!*`,
@@ -10180,7 +10348,7 @@ case 'pupil': {
                     clearAllPupilListeners();
                     console.error('Movie info error:', infoError);
                     await socket.sendMessage(sender, {
-                        image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                        image: { url: pickBotImage(sessionConfig) },
                         caption: formatMessage(
                             '❌ ERROR',
                             `*Movie details ලබාගැනීමේ දෝෂයක්:* ${infoError.message}`,
@@ -10198,7 +10366,7 @@ case 'pupil': {
         clearAllPupilListeners();
         console.error('PupilMovie command error:', error);
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 `*දෝෂයක් ඇතිවුණා:* ${error.message || 'Unknown error'}`,
@@ -10219,7 +10387,7 @@ case 'mslk': {
 
     if (!args.length) {
         return socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර චිත්‍රපටයේ නම ලබාදෙන්න! උදා: .moviesublk Avatar*',
@@ -10279,7 +10447,7 @@ case 'mslk': {
 
         if (!searchData.status || results.length === 0) {
             return socket.sendMessage(sender, {
-                image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image: { url: pickBotImage(sessionConfig) },
                 caption: formatMessage('❌ NO RESULTS', '*කිසිදු චිත්‍රපටයක් හමු නොවීය!*', `${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`)
             }, { quoted: msg });
         }
@@ -10295,7 +10463,7 @@ case 'mslk': {
         listText += `\n📌 _Reply with number to download!_${DEFAULT_FOOTER}`;
 
         const searchMsg = await socket.sendMessage(sender, {
-            image: { url: list[0].image || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: list[0].image || pickBotImage(sessionConfig) },
             caption: listText
         }, { quoted: msg });
 
@@ -10370,7 +10538,7 @@ case 'mslk': {
                 }
 
                 const infoMsg = await socket.sendMessage(sender, {
-                    image: { url: infoData.image || chosen.image || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                    image: { url: infoData.image || chosen.image || pickBotImage(sessionConfig) },
                     caption: infoText
                 }, { quoted: replyMek });
 
@@ -10506,7 +10674,7 @@ case 'rxporn':
 case 'rp': {
     if (!args.length) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '🔞 REXPORN SEARCH',
                 '*කරුණාකර search කිරීමට keyword එකක් දෙන්න!*\n\n*📌 Usage:* `.rexporn stepmom`\n*📌 Usage:* `.rexporn milf 18+`',
@@ -10552,7 +10720,7 @@ case 'rp': {
         const searchData = searchRes.data;
         if (!searchData.success || !searchData.results || searchData.results.length === 0) {
             await socket.sendMessage(sender, {
-                image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image: { url: pickBotImage(sessionConfig) },
                 caption: formatMessage(
                     '❌ NO RESULTS',
                     `*"${rpQuery}"* සඳහා ප්‍රතිඵල හමු නොවීය!`,
@@ -10572,7 +10740,7 @@ case 'rp': {
         listText += `╰──────────●➤\n> ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
         const searchMsg = await socket.sendMessage(sender, {
-            image: { url: rpList[0].thumbnail || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: rpList[0].thumbnail || pickBotImage(sessionConfig) },
             caption: listText
         }, { quoted: msg });
 
@@ -10634,7 +10802,7 @@ case 'rp': {
                 qualityText += `╰──────────●➤\n\n👉 *Quality reply කරන්න (1 = Best)*\n> ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
                 const qualityMsg = await socket.sendMessage(sender, {
-                    image: { url: dlData.thumbnail || chosenVideo.thumbnail || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                    image: { url: dlData.thumbnail || chosenVideo.thumbnail || pickBotImage(sessionConfig) },
                     caption: qualityText
                 }, { quoted: replyMek });
 
@@ -10997,7 +11165,7 @@ case 'm': {
 case 'anime':
     if (!args.length) {
         await socket.sendMessage(sender, {
-            image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image:  { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර ඇනිමේ එකේ නම ලබාදෙන්න! උදා: .anime naruto*',
@@ -11056,7 +11224,7 @@ case 'anime':
 
         if (!searchData.status || !searchData.data?.results || searchData.data.results.length === 0) {
             await socket.sendMessage(sender, {
-                image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image:  { url: pickBotImage(sessionConfig) },
                 caption: formatMessage(
                     '❌ NO RESULTS',
                     '*ඇනිමේ හමුවෙන්නේ නැත! 😞*',
@@ -11092,7 +11260,7 @@ case 'anime':
         const bannerUrl = config.ANIME_H;
 
         const sentMsg = await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE},
+            image: { url: pickBotImage(sessionConfig)},
             caption: listText
         }, { quoted: msg });
 
@@ -11132,7 +11300,7 @@ case 'anime':
                 const choice = parseInt(messageType) - 1;
                 if (isNaN(choice) || choice < 0 || choice >= animeResults.length) {
                     await socket.sendMessage(sender, {
-                        image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                        image:  { url: pickBotImage(sessionConfig) },
                         caption: formatMessage(
                             '❌ INVALID SELECTION',
                             `*වැරදි අංකයක්! 1-${animeResults.length} අතර තෝරන්න! 😕*`,
@@ -11164,7 +11332,7 @@ case 'anime':
 
                     if (!animeInfo.episodeList || animeInfo.episodeList.length === 0) {
                         await socket.sendMessage(sender, {
-                            image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                            image:  { url: pickBotImage(sessionConfig) },
                             caption: formatMessage(
                                 '❌ NO EPISODES',
                                 '*මෙම ඇනිමේ එක සඳහා කථාංග නොමැත!*',
@@ -11201,7 +11369,7 @@ case 'anime':
 
 > ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`;
 
-                    const posterUrl = animeInfo.poster || selectedItem.thumbnail || sessionConfig.BOT_IMAGE || config.BOT_IMAGE;
+                    const posterUrl = animeInfo.poster || selectedItem.thumbnail || pickBotImage(sessionConfig);
 
 
                     const infoMsg = await socket.sendMessage(sender, {
@@ -11293,7 +11461,7 @@ ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
                             console.error(`Download error for episode ${episodeData.episode}:`, error);
                             const episodeNumToShow = episodeData.episode || (episodes.findIndex(ep => ep === episodeData) + 1);
                             await socket.sendMessage(sender, {
-                                image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                                image:  { url: pickBotImage(sessionConfig) },
                                 caption: formatMessage(
                                     '❌ DOWNLOAD FAILED',
                                     `*Episode ${episodeNumToShow} download failed*\n${error.message}`,
@@ -11334,7 +11502,7 @@ ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
                             if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= episodes.length) {
                                 await socket.sendMessage(sender, {
-                                    image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                                    image:  { url: pickBotImage(sessionConfig) },
                                     caption: formatMessage(
                                         '❌ INVALID INPUT',
                                         `*කරුණාකර වලංගු අංකයක් ඇතුළත් කරන්න! (1-${episodes.length})*\n\nඋදා: \`1\` හෝ \`5\``,
@@ -11348,7 +11516,7 @@ ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
                             if (!episodeData) {
                                 await socket.sendMessage(sender, {
-                                    image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                                    image:  { url: pickBotImage(sessionConfig) },
                                     caption: formatMessage(
                                         '❌ INVALID EPISODE',
                                         `*වැරදි අංකයක්! 1-${episodes.length} අතර තෝරන්න.*`,
@@ -11380,7 +11548,7 @@ ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
                 } catch (detailsError) {
                     console.error('Anime details error:', detailsError);
                     await socket.sendMessage(sender, {
-                        image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                        image:  { url: pickBotImage(sessionConfig) },
                         caption: formatMessage(
                             '❌ ERROR',
                             `*Details ලබාගැනීමේ දෝෂයක්*\n${detailsError.message}`,
@@ -11409,7 +11577,7 @@ ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
         clearAllAnimeListeners();
         await socket.sendMessage(sender, {
-            image:  { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image:  { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 `*දෝෂයක් ඇතිවුණා:* ${error.message || 'Unknown error'}`,
@@ -12070,7 +12238,7 @@ case 'cartoon':
 case 'cartoonlk': {
     if (!args.length) {
         await socket.sendMessage(sender, {
-            image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: pickBotImage(sessionConfig) },
             caption: formatMessage(
                 '❌ ERROR',
                 '*කරුණාකර කාටූනයේ නම ලබාදෙන්න! උදා: .cartoon Ben 10*',
@@ -12114,7 +12282,7 @@ case 'cartoonlk': {
         const searchData = searchRes.data;
         if (!searchData.status || !searchData.data || searchData.data.length === 0) {
             await socket.sendMessage(sender, {
-                image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                image: { url: pickBotImage(sessionConfig) },
                 caption: formatMessage(
                     '❌ NO RESULTS',
                     '*කිසිදු කාටූනයක් හමු නොවීය!*',
@@ -12133,7 +12301,7 @@ case 'cartoonlk': {
         listText += `╰──────────●➤\n> ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
 
         const searchMsg = await socket.sendMessage(sender, {
-            image: { url: cartoonList[0].image || sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+            image: { url: cartoonList[0].image || pickBotImage(sessionConfig) },
             caption: listText
         }, { quoted: msg });
 
@@ -13195,7 +13363,7 @@ async function EmpirePair(number, res) {
 
                     // Welcome Message
                     await socket.sendMessage(userJid, {
-                        image: { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE },
+                        image: { url: pickBotImage(sessionConfig) },
                         caption: formatMessage(
                             '✨ *Bot Activated!*',
                             `📱 *Number:* ${sanitizedNumber}
