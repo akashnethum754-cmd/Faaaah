@@ -824,6 +824,65 @@ function pickBotImage(sc) {
     return BOT_IMAGES[Math.floor(Math.random() * BOT_IMAGES.length)];
 }
 
+// ==========================================================
+// 🎬 CineSubz download helpers (laksidu API 500 dunnoth chamindu API ekata fallback wenawa)
+// ==========================================================
+const CINE_FB_BASE = 'https://api.chamindu.site';
+const CINE_FB_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+const cineNorm = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+async function cineGetWithRetry(url) {
+    try {
+        return await axios.get(url, { timeout: 120000 });
+    } catch (e) {
+        const st = e.response?.status;
+        if (!st || st >= 500) { // server error / network -> ekaparak ayeth try
+            await new Promise(r => setTimeout(r, 3000));
+            return await axios.get(url, { timeout: 120000 });
+        }
+        throw e;
+    }
+}
+
+async function cineFallbackMovieLink(movieUrl, quality, index) {
+    const r = await axios.get(`${CINE_FB_BASE}/api/v1/movie/cinesubz/infodl?q=${encodeURIComponent(movieUrl)}&api_key=${CINE_FB_KEY}`, { timeout: 120000 });
+    const dls = r.data?.data?.downloads || [];
+    if (!r.data?.status || dls.length === 0) throw new Error('Fallback API eken download links hamu una na');
+    const hit = dls.find(d => cineNorm(d.quality) === cineNorm(quality)) || dls[index] || dls[0];
+    if (!hit?.link) throw new Error('Fallback API eken link eka na');
+    return { url: hit.link, quality: hit.quality };
+}
+
+async function cineFallbackEpisodeLink(showUrl, epList, selectedEpisode) {
+    const info = await axios.get(`${CINE_FB_BASE}/api/v1/movie/cinesubz/tv/info?q=${encodeURIComponent(showUrl)}&api_key=${CINE_FB_KEY}`, { timeout: 120000 });
+    const eps = info.data?.data?.episodes || [];
+    if (!info.data?.status || eps.length === 0) throw new Error('Fallback API eken episodes hamu una na');
+    let ep = eps.find(e => cineNorm(e.episode_name) && cineNorm(e.episode_name) === cineNorm(selectedEpisode.title));
+    if (!ep) {
+        const idx = (epList || []).findIndex(e => e.url === selectedEpisode.url);
+        if (idx > -1 && eps[idx]) ep = eps[idx];
+    }
+    if (!ep) throw new Error('Fallback API eken e episode eka hamu una na');
+    const dl = await axios.get(`${CINE_FB_BASE}/api/v1/movie/cinesubz/tv/dl?q=${encodeURIComponent(ep.episode_url)}&api_key=${CINE_FB_KEY}`, { timeout: 120000 });
+    const arr = dl.data?.data || [];
+    if (!dl.data?.status || arr.length === 0) throw new Error('Fallback API eken episode link eka na');
+    const nonT = arr.filter(l => l.link && !l.link.includes('t.me') && !l.link.includes('telegram'));
+    return { url: (nonT[0] || arr[0]).link };
+}
+
+// 📢 Channel ekata yawala WhatsApp eken reject kalada balanawa (ack error) - "yawwa" kiyala hariyata kiyanna
+async function sendToChannelChecked(socket, jid, content) {
+    const id = BaileysNS.generateMessageIDV2 ? BaileysNS.generateMessageIDV2(socket.user?.id) : BaileysNS.generateMessageID();
+    let ackErr = null;
+    const onAck = (node) => { if (node?.attrs?.error) ackErr = node.attrs.error; };
+    try { socket.ws.on('TAG:' + id, onAck); } catch { /* ignore */ }
+    const sent = await socket.sendMessage(jid, content, { messageId: id });
+    await new Promise(r => setTimeout(r, 4000));
+    try { socket.ws.off('TAG:' + id, onAck); } catch { /* ignore */ }
+    if (ackErr) throw new Error(`WhatsApp channel post eka reject kala (code ${ackErr}). Bot number eka channel eke admin/owner nemei wage.`);
+    return sent;
+}
+
 function formatMessage(title, content, footer) {
     return `╭━━━━━━━━━━━━━━━━━━━╮\n┃ ✨ *${title}* ✨\n╰━━━━━━━━━━━━━━━━━━━╯\n\n${content}\n\n━━━━━━━━━━━━━━━━━━━\n> 🎭 *${footer}* 🎭`;
 }
@@ -1192,6 +1251,10 @@ async function setupCommandHandlers(socket, number) {
                         if (!meta?.id) throw new Error('Channel eka hoyaganna baha');
                         channelJid = meta.id;
                         channelName = meta.name || meta.thread_metadata?.name?.text || 'Channel';
+                        const roleRaw = String(meta.viewer_metadata?.role || meta.role || meta.viewer?.role || '').toUpperCase();
+                        if (roleRaw && !['OWNER', 'ADMIN'].includes(roleRaw)) {
+                            throw new Error(`Bot number eka meka channel eke ${roleRaw} kenek. Post karanna nam *admin / owner* wenna one (channel eke Admins wala bot number eka add karanna).`);
+                        }
                     }
 
                     // 2) song eka hoyaganna
@@ -1231,8 +1294,8 @@ async function setupCommandHandlers(socket, number) {
 
 > 🎭 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 🎭`;
 
-                    await socket.sendMessage(channelJid, { image: { url: thumb }, caption });
-                    await socket.sendMessage(channelJid, { audio: audioBuf, mimetype: 'audio/mpeg', ptt: false });
+                    await sendToChannelChecked(socket, channelJid, { image: { url: thumb }, caption });
+                    await sendToChannelChecked(socket, channelJid, { audio: audioBuf, mimetype: 'audio/mpeg', ptt: false });
 
                     await socket.sendMessage(sender, { react: { text: '✅', key: msg.key } });
                     await socket.sendMessage(sender, {
@@ -1815,25 +1878,18 @@ case 'cinesubz':
 
                                                     try {
                                                         // 🟢 NEW: Download API - using selectedQuality.url (full ZT link)
-                                                        const downloadApiUrl = `https://apis.laksidu.site/dl/cinesubz?url=${encodeURIComponent(selectedQuality.url)}&api_key=lakiyaofc2`;
-                                                        const darkShanResponse = await axios.get(downloadApiUrl);
-                                                        const darkShanData = darkShanResponse.data;
-
-                                                        if (!darkShanData.status || !darkShanData.data?.download) {
-                                                            throw new Error('Failed to get download URL');
+                                                        let finalLink;
+                                                        try {
+                                                            const darkShanResponse = await cineGetWithRetry(`https://apis.laksidu.site/dl/cinesubz?url=${encodeURIComponent(selectedQuality.url)}&api_key=lakiyaofc2`);
+                                                            const darkShanData = darkShanResponse.data;
+                                                            if (!darkShanData.status || !darkShanData.data?.download) throw new Error('Failed to get download URL');
+                                                            const finalNonTelegramLinks = darkShanData.data.download.filter(link => link.name && link.name.toLowerCase() !== 'telegram');
+                                                            if (finalNonTelegramLinks.length === 0) throw new Error('No non-Telegram download links available');
+                                                            finalLink = finalNonTelegramLinks.find(link => link.name === 'unknown') || finalNonTelegramLinks[0];
+                                                        } catch (primaryErr) {
+                                                            console.error('[cinesubz tv] primary download API failed, trying fallback:', primaryErr.message);
+                                                            finalLink = await cineFallbackEpisodeLink(selectedItem.link, tvInfo.episodes?.list, selectedEpisode);
                                                         }
-
-                                                        const finalDownloadLinks = darkShanData.data.download;
-
-                                                        const finalNonTelegramLinks = finalDownloadLinks.filter(link => 
-                                                            link.name && link.name.toLowerCase() !== 'telegram'
-                                                        );
-
-                                                        if (finalNonTelegramLinks.length === 0) {
-                                                            throw new Error('No non-Telegram download links available');
-                                                        }
-
-                                                        const finalLink = finalNonTelegramLinks.find(link => link.name === 'unknown') || finalNonTelegramLinks[0];
 
                                                         await socket.sendMessage(sender, { react: { text: '📥', key: qualityMek.key } });
 
@@ -2008,24 +2064,20 @@ ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`
                                 }, { quoted: downloadMek });
 
                                 try {
-                                    const downloadResponse = await axios.get(`https://apis.laksidu.site/dl/cinesubz?url=${encodeURIComponent(selectedDownload.url)}&api_key=lakiyaofc2`);
-                                    const downloadData = downloadResponse.data;
-
-                                    if (!downloadData.status || !downloadData.data?.download) {
-                                        throw new Error('Failed to get download URL');
+                                    let downloadData, preferredLink;
+                                    try {
+                                        const downloadResponse = await cineGetWithRetry(`https://apis.laksidu.site/dl/cinesubz?url=${encodeURIComponent(selectedDownload.url)}&api_key=lakiyaofc2`);
+                                        downloadData = downloadResponse.data;
+                                        if (!downloadData.status || !downloadData.data?.download) throw new Error('Failed to get download URL');
+                                        const nonTelegramLinks = downloadData.data.download.filter(link => link.name && link.name.toLowerCase() !== 'telegram');
+                                        if (nonTelegramLinks.length === 0) throw new Error('No non-Telegram download links available');
+                                        preferredLink = nonTelegramLinks.find(link => link.name === 'unknown') || nonTelegramLinks[0];
+                                    } catch (primaryErr) {
+                                        console.error('[cinesubz] primary download API failed, trying fallback:', primaryErr.message);
+                                        const fb = await cineFallbackMovieLink(selectedItem.link, selectedDownload.quality, choiceNum);
+                                        downloadData = { data: {} };
+                                        preferredLink = { url: fb.url };
                                     }
-
-                                    const downloadLinks = downloadData.data.download;
-
-                                    const nonTelegramLinks = downloadLinks.filter(link => 
-                                        link.name && link.name.toLowerCase() !== 'telegram'
-                                    );
-
-                                    if (nonTelegramLinks.length === 0) {
-                                        throw new Error('No non-Telegram download links available');
-                                    }
-
-                                    const preferredLink = nonTelegramLinks.find(link => link.name === 'unknown') || nonTelegramLinks[0];
 
                                     await socket.sendMessage(sender, { react: { text: '📥', key: downloadMek.key } });
 
@@ -3066,25 +3118,18 @@ case 'cinesend': {
 
                                                     try {
                                                         // 🟢 NEW: Download API - using selectedQuality.url (full ZT link)
-                                                        const downloadApiUrl = `https://apis.laksidu.site/dl/cinesubz?url=${encodeURIComponent(selectedQuality.url)}&api_key=lakiyaofc2`;
-                                                        const darkShanResponse = await axios.get(downloadApiUrl);
-                                                        const darkShanData = darkShanResponse.data;
-
-                                                        if (!darkShanData.status || !darkShanData.data?.download) {
-                                                            throw new Error('Failed to get download URL');
+                                                        let finalLink;
+                                                        try {
+                                                            const darkShanResponse = await cineGetWithRetry(`https://apis.laksidu.site/dl/cinesubz?url=${encodeURIComponent(selectedQuality.url)}&api_key=lakiyaofc2`);
+                                                            const darkShanData = darkShanResponse.data;
+                                                            if (!darkShanData.status || !darkShanData.data?.download) throw new Error('Failed to get download URL');
+                                                            const finalNonTelegramLinks = darkShanData.data.download.filter(link => link.name && link.name.toLowerCase() !== 'telegram');
+                                                            if (finalNonTelegramLinks.length === 0) throw new Error('No non-Telegram download links available');
+                                                            finalLink = finalNonTelegramLinks.find(link => link.name === 'unknown') || finalNonTelegramLinks[0];
+                                                        } catch (primaryErr) {
+                                                            console.error('[cinesubz tv] primary download API failed, trying fallback:', primaryErr.message);
+                                                            finalLink = await cineFallbackEpisodeLink(selectedItem.link, tvInfo.episodes?.list, selectedEpisode);
                                                         }
-
-                                                        const finalDownloadLinks = darkShanData.data.download;
-
-                                                        const finalNonTelegramLinks = finalDownloadLinks.filter(link => 
-                                                            link.name && link.name.toLowerCase() !== 'telegram'
-                                                        );
-
-                                                        if (finalNonTelegramLinks.length === 0) {
-                                                            throw new Error('No non-Telegram download links available');
-                                                        }
-
-                                                        const finalLink = finalNonTelegramLinks.find(link => link.name === 'unknown') || finalNonTelegramLinks[0];
 
                                                         await socket.sendMessage(sender, { react: { text: '📥', key: qualityMek.key } });
 
@@ -3265,24 +3310,20 @@ ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`
                                 }, { quoted: downloadMek });
 
                                 try {
-                                    const downloadResponse = await axios.get(`https://apis.laksidu.site/dl/cinesubz?url=${encodeURIComponent(selectedDownload.url)}&api_key=lakiyaofc2`);
-                                    const downloadData = downloadResponse.data;
-
-                                    if (!downloadData.status || !downloadData.data?.download) {
-                                        throw new Error('Failed to get download URL');
+                                    let downloadData, preferredLink;
+                                    try {
+                                        const downloadResponse = await cineGetWithRetry(`https://apis.laksidu.site/dl/cinesubz?url=${encodeURIComponent(selectedDownload.url)}&api_key=lakiyaofc2`);
+                                        downloadData = downloadResponse.data;
+                                        if (!downloadData.status || !downloadData.data?.download) throw new Error('Failed to get download URL');
+                                        const nonTelegramLinks = downloadData.data.download.filter(link => link.name && link.name.toLowerCase() !== 'telegram');
+                                        if (nonTelegramLinks.length === 0) throw new Error('No non-Telegram download links available');
+                                        preferredLink = nonTelegramLinks.find(link => link.name === 'unknown') || nonTelegramLinks[0];
+                                    } catch (primaryErr) {
+                                        console.error('[cinesubz] primary download API failed, trying fallback:', primaryErr.message);
+                                        const fb = await cineFallbackMovieLink(selectedItem.link, selectedDownload.quality, choiceNum);
+                                        downloadData = { data: {} };
+                                        preferredLink = { url: fb.url };
                                     }
-
-                                    const downloadLinks = downloadData.data.download;
-
-                                    const nonTelegramLinks = downloadLinks.filter(link => 
-                                        link.name && link.name.toLowerCase() !== 'telegram'
-                                    );
-
-                                    if (nonTelegramLinks.length === 0) {
-                                        throw new Error('No non-Telegram download links available');
-                                    }
-
-                                    const preferredLink = nonTelegramLinks.find(link => link.name === 'unknown') || nonTelegramLinks[0];
 
                                     await socket.sendMessage(sender, { react: { text: '📥', key: downloadMek.key } });
 
