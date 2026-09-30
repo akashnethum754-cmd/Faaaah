@@ -1,262 +1,1997 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="si">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#070A14">
-<meta name="description" content="SHAGGY XMD: a WhatsApp bot for movies, series, anime, songs and downloads. Pair your number in a minute.">
-<title>SHAGGY XMD | WhatsApp movie bot</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23FFB020'/%3E%3Cpath d='M36 8 16 36h14l-4 20 22-30H34z' fill='%232A1B00'/%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;700&family=Noto+Sans+Sinhala:wght@400;600&display=swap" rel="stylesheet">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#070812">
+<meta name="description" content="SHAGGY XMD — Premium WhatsApp Movie, Anime, Music & Download Bot">
+<title>SHAGGY XMD | WhatsApp Bot</title>
+
+<link rel="icon" href="https://cdn.phototourl.com/free/2026-09-11-9979a852-3ada-4c09-ac79-18e472788e6c.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700;800&family=Hanken+Grotesk:wght@400;500;600;700&family=Noto+Sans+Sinhala:wght@400;500;600;700&display=swap" rel="stylesheet">
+
 <style>
-:root{--ink:#070A14;--panel:#0F1528;--panel2:#161F3A;--line:#242F52;--paper:#F4EEDF;--muted:#A3ADC6;--amber:#FFB020;--ember:#FF6B4A;--teal:#37D6A6;--d:'Bricolage Grotesque','Noto Sans Sinhala',system-ui,sans-serif;--b:'Hanken Grotesk','Noto Sans Sinhala',system-ui,sans-serif}
-*{box-sizing:border-box;margin:0;padding:0}
-html{scroll-behavior:smooth}
-body{background:var(--ink);color:var(--paper);font:400 16px/1.55 var(--b);overflow-x:hidden;position:relative}
-body::before{content:"";position:absolute;inset:0 0 auto;height:820px;pointer-events:none;background:radial-gradient(60% 70% at 50% -8%,rgba(255,176,32,.28),transparent 70%),radial-gradient(40% 40% at 88% 22%,rgba(255,107,74,.13),transparent 70%)}
-button,input{font:inherit;color:inherit}
-:focus-visible{outline:3px solid var(--amber);outline-offset:3px;border-radius:8px}
-.w{max-width:1160px;margin:0 auto;padding:0 20px;position:relative}
-.bar{position:sticky;top:0;z-index:20;background:rgba(7,10,20,.88);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
-.bar .w{display:flex;align-items:center;gap:16px;padding-top:11px;padding-bottom:11px;flex-wrap:wrap}
-.brand{display:flex;align-items:center;gap:10px;background:none;border:0;cursor:pointer;font:800 20px var(--d)}
-.mark{width:36px;height:36px;border-radius:11px;background:var(--amber);display:grid;place-items:center;overflow:hidden}
-.mark img{width:100%;height:100%;object-fit:cover}
-.tabs{margin-left:auto;display:flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:4px}
-.tab{background:none;border:0;border-radius:99px;padding:8px 18px;min-height:40px;font-weight:700;font-size:14px;color:var(--muted);cursor:pointer}
-.tab[aria-current]{background:var(--paper);color:var(--ink)}
-.live{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
-.dot{width:9px;height:9px;border-radius:50%;background:var(--muted)}.dot.on{background:var(--teal);box-shadow:0 0 0 4px rgba(55,214,166,.18)}.dot.off{background:var(--ember)}
-@media(max-width:700px){.tabs{order:3;width:100%;margin:0}.tab{flex:1}.live{margin-left:auto}}
-.view{display:none}.view.on{display:block}
-.hero{padding:64px 0 72px}
-.hg{display:grid;grid-template-columns:1.1fr .9fr;gap:52px;align-items:center}
-h1{font:800 clamp(40px,6.4vw,78px)/1 var(--d);letter-spacing:-.03em;max-width:14ch}
-.si{margin-top:20px;color:var(--amber);font-weight:600;font-size:18px}
-.lead{margin-top:14px;color:#D2CCBD;font-size:18px;max-width:46ch}
-.row{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}
-.btn{display:inline-flex;align-items:center;justify-content:center;min-height:54px;padding:0 28px;border-radius:15px;border:2px solid transparent;font-weight:700;cursor:pointer;text-decoration:none;transition:transform .12s,background .15s,border-color .15s}
-.btn:active{transform:translateY(1px)}
-.pri{background:linear-gradient(135deg,#FFC24D,var(--amber) 60%,#F58F1C);color:#2A1B00;box-shadow:0 10px 30px -10px rgba(255,176,32,.6)}
-.gho{border-color:var(--line);background:rgba(255,255,255,.03)}.gho:hover{border-color:var(--paper)}
-.btn[disabled]{opacity:.6;cursor:wait}
-.stats{display:flex;gap:34px;margin-top:38px;flex-wrap:wrap}
-.stats b{display:block;font:800 38px/1 var(--d);color:var(--paper)}.stats span{font-size:13px;color:var(--muted)}
-.frame{position:relative;max-width:410px;margin-left:auto;width:100%}
-.frame::before,.frame::after{content:"";position:absolute;top:24px;bottom:24px;width:14px;background:radial-gradient(circle at 50% 50%,var(--ink) 4px,transparent 5px) 0 0/14px 26px;border-radius:4px;background-color:var(--panel2);opacity:.9}
-.frame::before{left:-30px}.frame::after{right:-30px}
-.phone{background:#080D1C;border:1px solid var(--line);border-radius:32px;padding:10px;box-shadow:0 40px 80px -30px rgba(255,176,32,.28),0 0 0 6px rgba(255,255,255,.02);transform:rotate(1.6deg)}
-.ph{display:flex;align-items:center;gap:10px;padding:10px 12px}
-.av{width:38px;height:38px;border-radius:50%;background:var(--amber);color:#2A1B00;display:grid;place-items:center;font:800 14px var(--d)}
-.ph b{display:block;line-height:1.2}.ph span{font-size:12px;color:var(--teal)}
-.chat{background:#0E1629;border-radius:22px;padding:14px 12px;min-height:400px;display:flex;flex-direction:column;gap:9px}
-.m{max-width:88%;padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.45;white-space:pre-wrap;animation:pop .25s ease-out both}
-.m.me{align-self:flex-end;background:#0B3B36;border-bottom-right-radius:4px}.m.bot{align-self:flex-start;background:#1B2540;border-bottom-left-radius:4px}
-.pick{display:block;margin:9px -12px -9px;padding:10px;border-top:1px solid var(--line);text-align:center;color:var(--amber);font-weight:700}
-.fl{display:flex;gap:10px;align-items:center;margin-top:7px;padding:9px 10px;border-radius:10px;background:rgba(255,255,255,.06)}.fl small{display:block;color:var(--muted)}
-@keyframes pop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-@media(max-width:900px){.hg{grid-template-columns:1fr;gap:40px}.hero{padding:40px 0 48px}.frame{margin:0 auto}.frame::before{left:-16px}.frame::after{right:-16px}}
-@media(max-width:480px){.frame::before,.frame::after{display:none}}
-.sec{padding:72px 0}
-h2{font:800 clamp(28px,4vw,44px)/1.08 var(--d);letter-spacing:-.02em}
-.sub{margin-top:10px;color:var(--muted);max-width:56ch}
-.bento{margin-top:34px;display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
-.tile{border:1px solid var(--line);border-radius:24px;padding:24px;background:var(--panel);position:relative;overflow:hidden}
-.tile::before{content:"";position:absolute;inset:0;background:radial-gradient(80% 80% at 100% 0,var(--g,rgba(255,176,32,.16)),transparent 70%);pointer-events:none}
-.tile>*{position:relative}
-.tile h3{font:800 22px var(--d)}
-.tile .n{position:absolute;right:20px;top:14px;font:800 44px var(--d);color:rgba(244,238,223,.13)}
-.tile p{margin-top:6px;color:#CFC9BB;font-size:15px;max-width:34ch}
-.chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:16px}
-.chips code{background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:8px;padding:3px 9px;font-size:13px;color:var(--amber)}
-.t1{grid-column:span 2;grid-row:span 2;--g:rgba(255,107,74,.24)}.t1 h3{font-size:30px}.t2{grid-column:span 2;--g:rgba(55,214,166,.16)}.t3{--g:rgba(139,123,255,.2)}
-@media(max-width:900px){.bento{grid-template-columns:1fr 1fr}.t1{grid-column:span 2;grid-row:auto}}
-@media(max-width:560px){.bento{grid-template-columns:1fr}.t1,.t2{grid-column:auto}}
-.setg{margin-top:34px;display:grid;grid-template-columns:1fr 1fr;gap:34px;align-items:start}
-@media(max-width:900px){.setg{grid-template-columns:1fr}}
-.term{background:#080D1C;border:1px solid var(--line);border-radius:22px;padding:16px;display:flex;flex-direction:column;gap:9px}
-.keys{list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:0 22px}
-.keys li{padding:11px 0;border-bottom:1px solid var(--line);font-size:14px;color:var(--muted)}
-.keys code{display:block;color:var(--amber);font-size:13px;margin-bottom:1px}
-@media(max-width:560px){.keys{grid-template-columns:1fr}}
-.note{margin-top:14px;color:var(--muted);font-size:14px}
-.steps{margin-top:34px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px;list-style:none;counter-reset:s}
-.steps li{counter-increment:s;background:var(--panel);border:1px solid var(--line);border-radius:22px;padding:24px}
-.steps li::before{content:counter(s);display:grid;place-items:center;width:38px;height:38px;border-radius:50%;background:var(--paper);color:var(--ink);font:800 16px var(--d);margin-bottom:14px}
-.steps b{display:block;font:800 20px var(--d);margin-bottom:5px}.steps span{color:var(--muted);font-size:15px}
-@media(max-width:760px){.steps{grid-template-columns:1fr}}
-.foot{border-top:1px solid var(--line);padding:30px 0 44px;color:var(--muted);font-size:14px}
-.foot .w{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}.foot a{color:var(--paper)}
-.pg{padding:44px 0 72px}
-.pg h1{font-size:clamp(32px,5vw,54px);max-width:none}
-.split{margin-top:32px;display:grid;grid-template-columns:1.05fr .95fr;gap:30px;align-items:start}
-@media(max-width:900px){.split{grid-template-columns:1fr}}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:24px;padding:28px}
-.card h2{font-size:22px}
-.fld{margin-top:20px}.fld label{display:block;font-weight:700;font-size:14px;margin-bottom:8px}
-.inp{width:100%;min-height:54px;background:var(--ink);border:2px solid var(--line);border-radius:14px;padding:0 16px;font-size:18px}
-.inp:focus{outline:none;border-color:var(--amber)}
-.hint{font-size:13px;color:var(--muted);margin-top:7px}
-.chk{display:flex;gap:12px;align-items:flex-start;margin-top:18px;font-size:14px;color:#CFC9BB;cursor:pointer}.chk input{width:20px;height:20px;accent-color:var(--amber);flex:none;margin-top:2px}
-.card .btn{width:100%;margin-top:20px}
-.err{margin-top:14px;padding:12px 14px;border-radius:14px;background:rgba(255,107,74,.12);border:1px solid rgba(255,107,74,.5);color:#FFD0C7;font-size:14px}
-.tk{display:none;margin-top:24px;background:var(--paper);color:var(--ink);border-radius:18px;-webkit-mask:radial-gradient(circle 13px at 0 59px,#0000 98%,#000) left/51% 100% no-repeat,radial-gradient(circle 13px at 100% 59px,#0000 98%,#000) right/51% 100% no-repeat;mask:radial-gradient(circle 13px at 0 59px,#0000 98%,#000) left/51% 100% no-repeat,radial-gradient(circle 13px at 100% 59px,#0000 98%,#000) right/51% 100% no-repeat}
-.tk.on{display:block;animation:pop .3s both}
-.tt{height:56px;padding:0 24px;display:flex;align-items:center;justify-content:space-between;font:800 15px var(--d)}.tt small{font:500 13px var(--b);color:#4A5169}
-.perf{border-top:3px dotted #B9B19C;margin:1px 18px 0}
-.code{padding:22px 12px 8px;text-align:center;font:800 clamp(28px,8.4vw,50px)/1.1 var(--d);letter-spacing:.06em;white-space:nowrap}.code.ld{font-size:20px;letter-spacing:0;color:#4A5169;white-space:normal}
-.tm{padding:0 24px 8px;text-align:center;font-size:14px;color:#4A5169}
-.tk .btn{margin:8px 24px 22px;width:calc(100% - 48px);background:var(--ink);color:var(--paper)}
-.how{list-style:none;counter-reset:h}.how li{counter-increment:h;display:flex;gap:14px;padding:15px 0;border-bottom:1px solid var(--line);color:#CFC9BB;font-size:15px}.how li:last-child{border:0}
-.how li::before{content:counter(h);flex:none;width:30px;height:30px;border-radius:50%;background:var(--paper);color:var(--ink);display:grid;place-items:center;font:800 14px var(--d)}
-.aft{margin-top:16px;font-size:14px;color:var(--muted)}.aft b{color:var(--amber)}
-.toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:var(--paper);color:var(--ink);padding:12px 20px;border-radius:12px;font-weight:700;opacity:0;pointer-events:none;transition:.2s;z-index:50}.toast.on{opacity:1;transform:translate(-50%,0)}
-@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+:root{
+  --bg:#060710;
+  --bg2:#0a0d18;
+  --card:rgba(17,21,38,.78);
+  --card2:#11162a;
+  --line:rgba(255,255,255,.09);
+  --white:#fff;
+  --text:#eeeef5;
+  --muted:#9da4bb;
+  --blue:#00b7ff;
+  --blue2:#1478ff;
+  --red:#ff315f;
+  --pink:#ff4e91;
+  --green:#35e0a1;
+  --gold:#ffc857;
+  --font:"Hanken Grotesk","Noto Sans Sinhala",sans-serif;
+  --display:"Bricolage Grotesque","Noto Sans Sinhala",sans-serif;
+}
+
+*{
+  box-sizing:border-box;
+  margin:0;
+  padding:0;
+}
+
+html{
+  scroll-behavior:smooth;
+}
+
+body{
+  min-height:100vh;
+  background:
+    radial-gradient(circle at 15% 0%,rgba(0,183,255,.13),transparent 30%),
+    radial-gradient(circle at 90% 10%,rgba(255,49,95,.12),transparent 28%),
+    var(--bg);
+  color:var(--text);
+  font-family:var(--font);
+  overflow-x:hidden;
+}
+
+body:before{
+  content:"";
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  background-image:
+    linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);
+  background-size:55px 55px;
+  mask-image:linear-gradient(to bottom,black,transparent 85%);
+}
+
+a{
+  color:inherit;
+  text-decoration:none;
+}
+
+button,input{
+  font:inherit;
+}
+
+button{
+  cursor:pointer;
+}
+
+.container{
+  width:min(1160px,calc(100% - 32px));
+  margin:auto;
+}
+
+/* ================= HEADER ================= */
+
+.header{
+  position:sticky;
+  top:0;
+  z-index:100;
+  background:rgba(6,7,16,.78);
+  backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--line);
+}
+
+.nav{
+  min-height:76px;
+  display:flex;
+  align-items:center;
+  gap:18px;
+}
+
+.logo{
+  display:flex;
+  align-items:center;
+  gap:11px;
+  border:0;
+  background:none;
+  color:white;
+}
+
+.logo-img{
+  width:43px;
+  height:43px;
+  border-radius:13px;
+  object-fit:cover;
+  border:1px solid rgba(0,183,255,.4);
+  box-shadow:0 0 25px rgba(0,183,255,.2);
+}
+
+.logo-name{
+  font:800 21px var(--display);
+  letter-spacing:-.5px;
+}
+
+.logo-name span{
+  display:block;
+  color:var(--blue);
+  font-size:9px;
+  letter-spacing:2px;
+  font-weight:700;
+}
+
+.nav-links{
+  margin-left:auto;
+  display:flex;
+  gap:6px;
+  padding:4px;
+  background:rgba(255,255,255,.035);
+  border:1px solid var(--line);
+  border-radius:14px;
+}
+
+.nav-btn{
+  border:0;
+  color:var(--muted);
+  background:transparent;
+  padding:9px 18px;
+  border-radius:10px;
+  font-weight:700;
+  font-size:14px;
+}
+
+.nav-btn.active,
+.nav-btn:hover{
+  background:rgba(0,183,255,.12);
+  color:white;
+}
+
+.status{
+  margin-left:12px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  color:var(--muted);
+  font-size:12px;
+}
+
+.status-dot{
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:#777;
+}
+
+.status-dot.online{
+  background:var(--green);
+  box-shadow:0 0 0 5px rgba(53,224,161,.1),0 0 15px var(--green);
+}
+
+.status-dot.offline{
+  background:var(--red);
+}
+
+/* ================= HERO ================= */
+
+.hero{
+  position:relative;
+  padding:85px 0 70px;
+}
+
+.hero-grid{
+  display:grid;
+  grid-template-columns:1.05fr .95fr;
+  align-items:center;
+  gap:70px;
+}
+
+.badge{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 13px;
+  border:1px solid rgba(0,183,255,.22);
+  background:rgba(0,183,255,.07);
+  border-radius:99px;
+  color:#bdeeff;
+  font-size:12px;
+  font-weight:700;
+  margin-bottom:20px;
+}
+
+.badge i{
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:var(--green);
+  box-shadow:0 0 10px var(--green);
+}
+
+.hero h1{
+  font:800 clamp(42px,6vw,76px)/.98 var(--display);
+  letter-spacing:-3px;
+  max-width:760px;
+}
+
+.hero h1 span{
+  background:linear-gradient(90deg,var(--blue),#71ddff 45%,var(--pink));
+  -webkit-background-clip:text;
+  background-clip:text;
+  color:transparent;
+}
+
+.hero-si{
+  margin-top:21px;
+  color:#dfe5f5;
+  font-size:19px;
+  font-weight:600;
+}
+
+.hero-en{
+  margin-top:9px;
+  max-width:600px;
+  color:var(--muted);
+  line-height:1.7;
+  font-size:16px;
+}
+
+.hero-buttons{
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  margin-top:30px;
+}
+
+.btn{
+  min-height:52px;
+  padding:0 23px;
+  border-radius:14px;
+  border:1px solid var(--line);
+  display:inline-flex;
+  justify-content:center;
+  align-items:center;
+  gap:8px;
+  font-weight:700;
+  transition:.2s ease;
+}
+
+.btn:hover{
+  transform:translateY(-2px);
+}
+
+.primary{
+  color:white;
+  border-color:transparent;
+  background:linear-gradient(135deg,var(--blue2),var(--blue),#48d7ff);
+  box-shadow:0 12px 35px rgba(0,183,255,.22);
+}
+
+.secondary{
+  background:rgba(255,255,255,.035);
+}
+
+.stats{
+  display:flex;
+  flex-wrap:wrap;
+  gap:34px;
+  margin-top:38px;
+}
+
+.stat strong{
+  display:block;
+  font:800 32px var(--display);
+}
+
+.stat span{
+  color:var(--muted);
+  font-size:12px;
+}
+
+/* ================= PHONE PREVIEW ================= */
+
+.phone-wrap{
+  position:relative;
+  display:flex;
+  justify-content:center;
+}
+
+.glow{
+  position:absolute;
+  width:320px;
+  height:320px;
+  background:linear-gradient(135deg,var(--blue),var(--pink));
+  filter:blur(100px);
+  opacity:.15;
+}
+
+.phone{
+  position:relative;
+  width:min(350px,100%);
+  padding:10px;
+  border-radius:32px;
+  background:linear-gradient(145deg,#202942,#090c17);
+  border:1px solid rgba(255,255,255,.13);
+  box-shadow:0 35px 80px rgba(0,0,0,.5);
+  transform:rotate(1deg);
+}
+
+.phone-top{
+  padding:12px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.avatar{
+  width:40px;
+  height:40px;
+  border-radius:50%;
+  object-fit:cover;
+  border:1px solid rgba(0,183,255,.5);
+}
+
+.phone-name{
+  font-weight:700;
+}
+
+.phone-online{
+  display:block;
+  color:var(--green);
+  font-size:11px;
+}
+
+.chat{
+  min-height:430px;
+  padding:14px;
+  background:
+    radial-gradient(circle at 20% 10%,rgba(0,183,255,.06),transparent 35%),
+    #080c18;
+  border-radius:23px;
+  display:flex;
+  flex-direction:column;
+  gap:9px;
+}
+
+.message{
+  max-width:88%;
+  padding:10px 12px;
+  border-radius:14px;
+  font-size:13px;
+  line-height:1.45;
+}
+
+.message.me{
+  align-self:flex-end;
+  background:#075a50;
+  border-bottom-right-radius:4px;
+}
+
+.message.bot{
+  align-self:flex-start;
+  background:#18223b;
+  border-bottom-left-radius:4px;
+}
+
+.file{
+  margin-top:8px;
+  padding:9px;
+  border-radius:10px;
+  background:rgba(255,255,255,.06);
+  display:flex;
+  gap:9px;
+}
+
+.file small{
+  display:block;
+  color:var(--muted);
+}
+
+/* ================= SECTION ================= */
+
+.section{
+  padding:80px 0;
+}
+
+.section-head{
+  max-width:700px;
+}
+
+.section-label{
+  color:var(--blue);
+  font-size:12px;
+  letter-spacing:2px;
+  text-transform:uppercase;
+  font-weight:800;
+}
+
+.section h2{
+  margin-top:8px;
+  font:800 clamp(30px,4vw,48px)/1.05 var(--display);
+  letter-spacing:-1.5px;
+}
+
+.section-desc{
+  margin-top:12px;
+  color:var(--muted);
+  line-height:1.7;
+}
+
+/* ================= COMMAND CARDS ================= */
+
+.command-grid{
+  margin-top:32px;
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:15px;
+}
+
+.command-card{
+  position:relative;
+  overflow:hidden;
+  min-height:190px;
+  padding:25px;
+  border:1px solid var(--line);
+  border-radius:23px;
+  background:linear-gradient(145deg,rgba(19,25,46,.88),rgba(10,13,26,.88));
+}
+
+.command-card:after{
+  content:"";
+  position:absolute;
+  width:130px;
+  height:130px;
+  right:-50px;
+  top:-50px;
+  border-radius:50%;
+  background:var(--blue);
+  opacity:.07;
+  filter:blur(25px);
+}
+
+.command-icon{
+  width:46px;
+  height:46px;
+  display:grid;
+  place-items:center;
+  border-radius:14px;
+  background:rgba(0,183,255,.1);
+  border:1px solid rgba(0,183,255,.18);
+  font-size:22px;
+}
+
+.command-card h3{
+  margin-top:17px;
+  font:800 21px var(--display);
+}
+
+.command-card p{
+  margin-top:6px;
+  color:var(--muted);
+  font-size:14px;
+}
+
+.command-list{
+  margin-top:14px;
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+
+.command-list code{
+  padding:4px 8px;
+  border-radius:7px;
+  background:rgba(255,255,255,.05);
+  color:#b9eaff;
+  border:1px solid var(--line);
+  font-size:11px;
+}
+
+/* ================= SET ================= */
+
+.set-box{
+  margin-top:32px;
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:20px;
+}
+
+.terminal{
+  padding:20px;
+  border-radius:22px;
+  background:#070a12;
+  border:1px solid var(--line);
+}
+
+.terminal-top{
+  display:flex;
+  gap:6px;
+  margin-bottom:18px;
+}
+
+.terminal-top i{
+  width:9px;
+  height:9px;
+  border-radius:50%;
+  background:#555;
+}
+
+.term-msg{
+  padding:12px;
+  border-radius:12px;
+  background:#10172a;
+  margin-top:8px;
+  color:#c9d2e8;
+  font-size:13px;
+  white-space:pre-wrap;
+}
+
+.term-msg.user{
+  background:#063e39;
+}
+
+.settings{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:0 20px;
+}
+
+.setting{
+  padding:13px 0;
+  border-bottom:1px solid var(--line);
+}
+
+.setting code{
+  color:var(--blue);
+  font-size:12px;
+}
+
+.setting span{
+  display:block;
+  color:var(--muted);
+  font-size:12px;
+  margin-top:2px;
+}
+
+/* ================= STEPS ================= */
+
+.steps{
+  margin-top:32px;
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:15px;
+}
+
+.step{
+  padding:27px;
+  border:1px solid var(--line);
+  border-radius:23px;
+  background:var(--card);
+}
+
+.step-no{
+  width:40px;
+  height:40px;
+  display:grid;
+  place-items:center;
+  border-radius:12px;
+  background:linear-gradient(135deg,var(--blue2),var(--blue));
+  font-weight:800;
+}
+
+.step h3{
+  margin-top:17px;
+  font:800 20px var(--display);
+}
+
+.step .si{
+  margin-top:7px;
+  color:#d7dced;
+  font-size:14px;
+}
+
+.step .en{
+  margin-top:5px;
+  color:var(--muted);
+  font-size:13px;
+}
+
+/* ================= PAIR PAGE ================= */
+
+.page{
+  display:none;
+  padding:60px 0 90px;
+}
+
+.page.active{
+  display:block;
+}
+
+.page-title{
+  font:800 clamp(38px,5vw,60px)/1 var(--display);
+  letter-spacing:-2px;
+}
+
+.page-title span{
+  color:var(--blue);
+}
+
+.pair-layout{
+  margin-top:35px;
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:20px;
+}
+
+.card{
+  border:1px solid var(--line);
+  background:var(--card);
+  border-radius:26px;
+  padding:28px;
+  backdrop-filter:blur(12px);
+}
+
+.card h2{
+  font:800 25px var(--display);
+}
+
+.card-sub{
+  margin-top:5px;
+  color:var(--muted);
+  font-size:14px;
+}
+
+.field{
+  margin-top:24px;
+}
+
+.field label{
+  display:block;
+  margin-bottom:8px;
+  font-size:13px;
+  font-weight:700;
+}
+
+.input{
+  width:100%;
+  min-height:56px;
+  padding:0 17px;
+  border-radius:15px;
+  background:#070a12;
+  color:white;
+  border:1px solid var(--line);
+  outline:none;
+  font-size:17px;
+}
+
+.input:focus{
+  border-color:var(--blue);
+  box-shadow:0 0 0 4px rgba(0,183,255,.08);
+}
+
+.hint{
+  margin-top:7px;
+  color:var(--muted);
+  font-size:12px;
+}
+
+.check{
+  margin-top:18px;
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  color:var(--muted);
+  font-size:12px;
+}
+
+.check input{
+  margin-top:3px;
+  accent-color:var(--blue);
+}
+
+.pair-btn{
+  width:100%;
+  margin-top:20px;
+}
+
+.error{
+  display:none;
+  margin-top:13px;
+  padding:12px 14px;
+  border-radius:13px;
+  background:rgba(255,49,95,.1);
+  border:1px solid rgba(255,49,95,.3);
+  color:#ffb8c8;
+  font-size:13px;
+}
+
+.ticket{
+  display:none;
+  margin-top:22px;
+  padding:22px;
+  border-radius:20px;
+  background:linear-gradient(145deg,#eaf7ff,#dcecff);
+  color:#07101d;
+  text-align:center;
+}
+
+.ticket.show{
+  display:block;
+  animation:pop .3s ease;
+}
+
+.ticket-title{
+  font-weight:800;
+  letter-spacing:2px;
+  font-size:12px;
+}
+
+.pair-code{
+  margin-top:15px;
+  font:800 clamp(32px,8vw,48px) var(--display);
+  letter-spacing:6px;
+}
+
+.pair-code.loading{
+  font-size:18px;
+  letter-spacing:0;
+}
+
+.ticket-info{
+  color:#586274;
+  font-size:12px;
+  margin-top:7px;
+}
+
+.copy{
+  width:100%;
+  margin-top:17px;
+  min-height:48px;
+  border:0;
+  border-radius:13px;
+  background:#07101d;
+  color:white;
+  font-weight:800;
+}
+
+.copy:hover{
+  background:#101d30;
+}
+
+.guide{
+  list-style:none;
+  margin-top:12px;
+  counter-reset:item;
+}
+
+.guide li{
+  counter-increment:item;
+  display:flex;
+  gap:13px;
+  padding:17px 0;
+  border-bottom:1px solid var(--line);
+}
+
+.guide li:last-child{
+  border-bottom:0;
+}
+
+.guide li:before{
+  content:counter(item);
+  flex:none;
+  width:30px;
+  height:30px;
+  display:grid;
+  place-items:center;
+  border-radius:9px;
+  background:rgba(0,183,255,.12);
+  color:var(--blue);
+  font-weight:800;
+}
+
+.guide strong{
+  display:block;
+  font-size:14px;
+}
+
+.guide span{
+  display:block;
+  margin-top:3px;
+  color:var(--muted);
+  font-size:12px;
+}
+
+/* ================= FOOTER ================= */
+
+.footer{
+  border-top:1px solid var(--line);
+  padding:30px 0 40px;
+  color:var(--muted);
+  font-size:12px;
+}
+
+.footer-inner{
+  display:flex;
+  justify-content:space-between;
+  gap:15px;
+  flex-wrap:wrap;
+}
+
+.footer b{
+  color:white;
+}
+
+.toast{
+  position:fixed;
+  left:50%;
+  bottom:25px;
+  transform:translate(-50%,20px);
+  padding:12px 18px;
+  border-radius:12px;
+  background:#f4f7ff;
+  color:#080b13;
+  font-weight:800;
+  font-size:13px;
+  opacity:0;
+  pointer-events:none;
+  transition:.2s;
+  z-index:999;
+}
+
+.toast.show{
+  opacity:1;
+  transform:translate(-50%,0);
+}
+
+/* ================= ANIMATIONS ================= */
+
+@keyframes pop{
+  from{
+    opacity:0;
+    transform:translateY(8px);
+  }
+  to{
+    opacity:1;
+    transform:none;
+  }
+}
+
+@keyframes float{
+  0%,100%{transform:translateY(0)}
+  50%{transform:translateY(-7px)}
+}
+
+.phone{
+  animation:float 5s ease-in-out infinite;
+}
+
+/* ================= RESPONSIVE ================= */
+
+@media(max-width:900px){
+
+  .hero-grid,
+  .pair-layout,
+  .set-box{
+    grid-template-columns:1fr;
+  }
+
+  .hero{
+    padding-top:55px;
+  }
+
+  .phone-wrap{
+    max-width:430px;
+    margin:auto;
+  }
+
+  .command-grid{
+    grid-template-columns:1fr 1fr;
+  }
+
+  .steps{
+    grid-template-columns:1fr;
+  }
+}
+
+@media(max-width:650px){
+
+  .container{
+    width:min(100% - 22px,1160px);
+  }
+
+  .nav{
+    min-height:68px;
+    flex-wrap:wrap;
+    padding:9px 0;
+  }
+
+  .logo-name{
+    font-size:18px;
+  }
+
+  .logo-img{
+    width:38px;
+    height:38px;
+  }
+
+  .nav-links{
+    order:3;
+    width:100%;
+  }
+
+  .nav-btn{
+    flex:1;
+  }
+
+  .status{
+    margin-left:auto;
+  }
+
+  .hero{
+    padding:42px 0 55px;
+  }
+
+  .hero h1{
+    font-size:44px;
+    letter-spacing:-2px;
+  }
+
+  .hero-si{
+    font-size:16px;
+  }
+
+  .hero-en{
+    font-size:14px;
+  }
+
+  .hero-buttons{
+    flex-direction:column;
+  }
+
+  .btn{
+    width:100%;
+  }
+
+  .stats{
+    gap:23px;
+  }
+
+  .section{
+    padding:58px 0;
+  }
+
+  .command-grid{
+    grid-template-columns:1fr;
+  }
+
+  .settings{
+    grid-template-columns:1fr;
+  }
+
+  .card{
+    padding:21px;
+  }
+
+  .page{
+    padding:42px 0 65px;
+  }
+
+  .footer-inner{
+    flex-direction:column;
+  }
+}
+
+@media(prefers-reduced-motion:reduce){
+  *{
+    animation:none!important;
+    transition:none!important;
+    scroll-behavior:auto!important;
+  }
+}
 </style>
 </head>
+
 <body>
-<header class="bar"><div class="w">
-  <button class="brand" data-go="home" aria-label="SHAGGY XMD home"><span class="mark"><img src="https://cdn.phototourl.com/free/2026-09-11-9979a852-3ada-4c09-ac79-18e472788e6c.png" alt="" onerror="this.outerHTML='<svg width=20 height=20 viewBox=&quot;0 0 64 64&quot;><path d=&quot;M36 6 14 38h15l-4 20 25-33H34z&quot; fill=&quot;#2A1B00&quot;/></svg>'"></span>SHAGGY XMD</button>
-  <nav class="tabs" aria-label="Main"><button class="tab" data-go="home">Home</button><button class="tab" data-go="pair">Pair Web</button></nav>
-  <div class="live" role="status"><span class="dot" id="dot"></span><span id="live">Checking status</span></div>
-</div></header>
 
-<main class="view" id="v-home">
-  <section class="hero"><div class="w hg">
+<!-- ================= HEADER ================= -->
+
+<header class="header">
+  <div class="container nav">
+
+    <button class="logo" data-page="home">
+      <img class="logo-img"
+        src="https://cdn.phototourl.com/free/2026-09-11-9979a852-3ada-4c09-ac79-18e472788e6c.png"
+        alt="SHAGGY XMD">
+
+      <div class="logo-name">
+        SHAGGY XMD
+        <span>POWERED BY SHAGGY TECH</span>
+      </div>
+    </button>
+
+    <nav class="nav-links">
+      <button class="nav-btn active" data-page="home">Home</button>
+      <button class="nav-btn" data-page="pair">Pair Web</button>
+    </nav>
+
+    <div class="status">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Checking...</span>
+    </div>
+
+  </div>
+</header>
+
+
+<!-- ================= HOME ================= -->
+
+<main id="homePage" class="page active">
+
+<section class="hero">
+<div class="container hero-grid">
+
+<div>
+
+  <div class="badge">
+    <i></i>
+    SHAGGY XMD v4 • WHATSAPP BOT
+  </div>
+
+  <h1>
+    Your WhatsApp.
+    <span>Your Entertainment.</span>
+  </h1>
+
+  <p class="hero-si">
+    🎬 චිත්‍රපට • 📺 Series • 🎵 සින්දු • 🤖 Anime
+  </p>
+
+  <p class="hero-en">
+    SHAGGY XMD is a powerful WhatsApp bot for movies, series,
+    anime, music and useful downloads — all directly inside WhatsApp.
+  </p>
+
+  <div class="hero-buttons">
+    <button class="btn primary" data-page="pair">
+      🔗 Pair WhatsApp
+    </button>
+
+    <a class="btn secondary" href="#commands">
+      📋 View Commands
+    </a>
+  </div>
+
+  <div class="stats">
+
+    <div class="stat">
+      <strong>67+</strong>
+      <span>Commands</span>
+    </div>
+
+    <div class="stat">
+      <strong>6</strong>
+      <span>Categories</span>
+    </div>
+
+    <div class="stat">
+      <strong>v4</strong>
+      <span>Latest Release</span>
+    </div>
+
+  </div>
+
+</div>
+
+
+<!-- PHONE -->
+
+<div class="phone-wrap">
+
+<div class="glow"></div>
+
+<div class="phone">
+
+  <div class="phone-top">
+
+    <img class="avatar"
+      src="https://cdn.phototourl.com/free/2026-09-11-9979a852-3ada-4c09-ac79-18e472788e6c.png"
+      alt="SHAGGY XMD">
+
     <div>
-      <h1>Movies, songs and downloads, right inside WhatsApp.</h1>
-      <p class="si">චිත්‍රපට, සිංහල උපසිරැසි, සින්දු. සියල්ල WhatsApp එකෙන්ම.</p>
-      <p class="lead">SHAGGY XMD is a WhatsApp bot with 67 commands for movies, series, anime, music and file downloads. Pair your number and it is ready in about a minute.</p>
-      <div class="row"><button class="btn pri" data-go="pair">Pair Web</button><a class="btn gho" href="#cmds" data-scroll="cmds">See the commands</a></div>
-      <div class="stats"><div><b data-n="67">0</b><span>commands</span></div><div><b data-n="6">0</b><span>categories</span></div><div><b>v4</b><span>latest release</span></div></div>
+      <div class="phone-name">SHAGGY XMD</div>
+      <span class="phone-online">● Online</span>
     </div>
-    <div class="frame"><div class="phone" aria-label="Example chat">
-      <div class="ph"><div class="av">SX</div><div><b>SHAGGY XMD</b><span>online</span></div></div>
-      <div class="chat" id="chat"></div>
-    </div></div>
-  </div></section>
 
-  <section class="sec" id="cmds" style="padding-top:8px"><div class="w">
-    <h2>Everything is in the menu</h2>
-    <p class="sub">Send <b>.menu</b> to your bot, pick a category, pick a command.</p>
-    <div class="bento">
-      <div class="tile t1"><span class="n">25</span><h3>Movies and TV</h3><p>Search, choose a quality and get the file in your chat. Sinhala subtitles included where the source has them.</p><div class="chips"><code>.movie</code><code>.cineverse</code><code>.cinesubz</code><code>.moviesublk</code><code>.cinetv</code><code>.cinesend</code><code>.tvsend</code></div></div>
-      <div class="tile t2"><span class="n">12</span><h3>Downloaders</h3><p>Songs, YouTube, TikTok, MediaFire and Google Drive.</p><div class="chips"><code>.song</code><code>.csong</code><code>.tiktok</code><code>.mediafire</code></div></div>
-      <div class="tile t3"><span class="n">4</span><h3>Anime</h3><p>Find an episode and get it as a file.</p></div>
-      <div class="tile t3"><span class="n">11</span><h3>Tools and fun</h3><p>Everyday helpers for any chat.</p></div>
-      <div class="tile t2" style="--g:rgba(255,176,32,.16)"><span class="n">10</span><h3>General and group</h3><p>Alive check, group info, tagging, view-once restore with <b>.vv</b>.</p></div>
-      <div class="tile t2" style="--g:rgba(255,107,74,.16)"><span class="n">5</span><h3>Admin</h3><p>Owner controls, settings and deleted message recovery.</p></div>
-    </div>
-  </div></section>
+  </div>
 
-  <section class="sec" style="padding-top:8px"><div class="w">
-    <h2>Change anything with .set</h2>
-    <p class="sub">Settings live in WhatsApp now. Send <b>.set</b> alone to see your current values, or change one or many at once.</p>
-    <div class="setg">
-      <div class="term" aria-label="Example .set chat">
-        <div class="m me">.set BOT_NAME:My Movie Bot</div>
-        <div class="m bot">✅ UPDATE SUCCESS
-🎀 BOT_NAME ──❯ My Movie Bot</div>
-        <div class="m me">.set ANTI_DELETE:on, PREFIX:!</div>
-        <div class="m bot">✅ UPDATE SUCCESS
+  <div class="chat" id="chat"></div>
+
+</div>
+</div>
+
+</div>
+</section>
+
+
+<!-- COMMANDS -->
+
+<section class="section" id="commands">
+<div class="container">
+
+<div class="section-head">
+  <div class="section-label">BOT FEATURES</div>
+
+  <h2>Everything you need in one bot.</h2>
+
+  <p class="section-desc">
+    <b>.menu</b> යවලා category එකක් තෝරන්න.
+    ඉන්පසු අවශ්‍ය command එක select කරන්න.
+    <br>
+    Send <b>.menu</b>, choose a category and use the command you need.
+  </p>
+</div>
+
+
+<div class="command-grid">
+
+<div class="command-card">
+  <div class="command-icon">🎬</div>
+  <h3>Movies & TV</h3>
+  <p>චිත්‍රපට සහ TV series සොයලා download කරන්න.</p>
+  <div class="command-list">
+    <code>.movie</code>
+    <code>.cineverse</code>
+    <code>.cinesubz</code>
+    <code>.cinetv</code>
+    <code>.tvsend</code>
+  </div>
+</div>
+
+
+<div class="command-card">
+  <div class="command-icon">🎵</div>
+  <h3>Music & Songs</h3>
+  <p>ඔයා කැමති songs search කරලා ලබාගන්න.</p>
+  <div class="command-list">
+    <code>.song</code>
+    <code>.csong</code>
+  </div>
+</div>
+
+
+<div class="command-card">
+  <div class="command-icon">⬇️</div>
+  <h3>Downloaders</h3>
+  <p>YouTube, TikTok සහ direct download services.</p>
+  <div class="command-list">
+    <code>.tiktok</code>
+    <code>.yt</code>
+    <code>.mediafire</code>
+    <code>.gdrive</code>
+  </div>
+</div>
+
+
+<div class="command-card">
+  <div class="command-icon">🍥</div>
+  <h3>Anime</h3>
+  <p>Anime episodes search කරලා ලබාගන්න.</p>
+  <div class="command-list">
+    <code>.anime</code>
+    <code>.episode</code>
+  </div>
+</div>
+
+
+<div class="command-card">
+  <div class="command-icon">🛠️</div>
+  <h3>Tools & Fun</h3>
+  <p>Daily-use tools සහ fun commands.</p>
+  <div class="command-list">
+    <code>.alive</code>
+    <code>.ping</code>
+    <code>.vv</code>
+  </div>
+</div>
+
+
+<div class="command-card">
+  <div class="command-icon">⚙️</div>
+  <h3>Admin & Settings</h3>
+  <p>Bot owner සඳහා advanced controls.</p>
+  <div class="command-list">
+    <code>.set</code>
+    <code>.mode</code>
+    <code>.prefix</code>
+  </div>
+</div>
+
+</div>
+</div>
+</section>
+
+
+<!-- SET -->
+
+<section class="section">
+<div class="container">
+
+<div class="section-head">
+  <div class="section-label">SMART SETTINGS</div>
+
+  <h2>Change your bot with .set</h2>
+
+  <p class="section-desc">
+    Bot settings WhatsApp එකෙන්ම වෙනස් කරන්න.
+    No dashboard required.
+  </p>
+</div>
+
+
+<div class="set-box">
+
+<div class="terminal">
+
+  <div class="terminal-top">
+    <i></i><i></i><i></i>
+  </div>
+
+  <div class="term-msg user">
+.set BOT_NAME:My Movie Bot
+  </div>
+
+  <div class="term-msg">
+✅ UPDATE SUCCESS
+
+🎀 BOT_NAME ──❯ My Movie Bot
+  </div>
+
+  <div class="term-msg user">
+.set PREFIX:!, ANTI_DELETE:on
+  </div>
+
+  <div class="term-msg">
+✅ SETTINGS UPDATED
+
+🎀 PREFIX ──❯ !
 🎀 ANTI_DELETE ──❯ true
-🎀 PREFIX ──❯ !</div>
-      </div>
-      <div>
-        <ul class="keys">
-          <li><code>BOT_NAME</code>Name shown in menus</li>
-          <li><code>PREFIX</code>1 to 3 characters</li>
-          <li><code>MODE</code>public, private, inbox, groups</li>
-          <li><code>BOT_IMAGE</code>Image link for replies</li>
-          <li><code>ANTI_DELETE</code>Recover deleted messages</li>
-          <li><code>BUTTON_MODE</code>Tap buttons, not numbers</li>
-          <li><code>ALWAYS_ONLINE</code>Stay online</li>
-          <li><code>AUTO_TYPING</code>Show typing</li>
-          <li><code>STATUS_VIEW</code>View statuses</li>
-          <li><code>AUTO_LIKE</code>Like statuses</li>
-        </ul>
-        <p class="note">Use on / off (or true / false) for switches. Changes apply to your running bot right away, and the bot re-checks its saved settings every 5 minutes.</p>
-      </div>
-    </div>
-  </div></section>
+  </div>
 
-  <section class="sec" style="padding-top:8px"><div class="w">
-    <h2>Ready in three steps</h2>
-    <ol class="steps"><li><b>Get a pair code</b><span>Open Pair Web and enter your number with country code.</span></li><li><b>Link it in WhatsApp</b><span>Linked devices, Link with phone number, type the code.</span></li><li><b>Send .menu</b><span>Your bot replies with its menu. Pick a category and go.</span></li></ol>
-    <div class="row"><button class="btn pri" data-go="pair">Open Pair Web</button></div>
-  </div></section>
+</div>
+
+
+<div class="settings">
+
+<div class="setting">
+  <code>BOT_NAME</code>
+  <span>Menu එකේ පෙන්වන bot name</span>
+</div>
+
+<div class="setting">
+  <code>PREFIX</code>
+  <span>Command prefix එක</span>
+</div>
+
+<div class="setting">
+  <code>MODE</code>
+  <span>Public / Private / Groups</span>
+</div>
+
+<div class="setting">
+  <code>BOT_IMAGE</code>
+  <span>Reply image URL</span>
+</div>
+
+<div class="setting">
+  <code>ANTI_DELETE</code>
+  <span>Deleted messages recover කිරීම</span>
+</div>
+
+<div class="setting">
+  <code>BUTTON_MODE</code>
+  <span>Buttons enable / disable</span>
+</div>
+
+<div class="setting">
+  <code>AUTO_TYPING</code>
+  <span>Typing indicator</span>
+</div>
+
+<div class="setting">
+  <code>ALWAYS_ONLINE</code>
+  <span>Online status</span>
+</div>
+
+</div>
+
+</div>
+</div>
+</section>
+
+
+<!-- HOW -->
+
+<section class="section">
+<div class="container">
+
+<div class="section-head">
+  <div class="section-label">GET STARTED</div>
+
+  <h2>Pair කරන්න ලේසිම විදිහ.</h2>
+
+  <p class="section-desc">
+    Follow these 3 simple steps and connect your WhatsApp.
+  </p>
+</div>
+
+
+<div class="steps">
+
+<div class="step">
+  <div class="step-no">01</div>
+
+  <h3>Pair Code ගන්න</h3>
+
+  <p class="si">
+    Pair Web එක open කරලා WhatsApp number එක ඇතුළත් කරන්න.
+  </p>
+
+  <p class="en">
+    Open Pair Web and enter your number with country code.
+  </p>
+</div>
+
+
+<div class="step">
+  <div class="step-no">02</div>
+
+  <h3>WhatsApp Link කරන්න</h3>
+
+  <p class="si">
+    WhatsApp → Linked Devices → Link with phone number.
+  </p>
+
+  <p class="en">
+    Enter the 8-character code shown on this website.
+  </p>
+</div>
+
+
+<div class="step">
+  <div class="step-no">03</div>
+
+  <h3>.menu යවන්න</h3>
+
+  <p class="si">
+    Bot එකෙන් welcome message එක ලැබුණාම .menu යවන්න.
+  </p>
+
+  <p class="en">
+    Send .menu and start using SHAGGY XMD.
+  </p>
+</div>
+
+</div>
+
+
+<div class="hero-buttons">
+  <button class="btn primary" data-page="pair">
+    🔗 Open Pair Web
+  </button>
+</div>
+
+</div>
+</section>
+
 </main>
 
-<main class="view" id="v-pair"><div class="w pg">
-  <h1>Pair Web</h1>
-  <p class="sub">Link your WhatsApp number to SHAGGY XMD. You get an 8 character code to type into WhatsApp.</p>
-  <div class="split">
-    <section class="card">
-      <h2>Your WhatsApp number</h2>
-      <div class="fld"><label for="phone">Number with country code</label><input class="inp" id="phone" type="tel" inputmode="numeric" maxlength="15" autocomplete="tel" placeholder="94768069800"><p class="hint">Digits only. No plus sign, no spaces.</p></div>
-      <label class="chk"><input type="checkbox" id="terms" checked><span>I understand this links a WhatsApp account to the bot. I will use a secondary number if I can.</span></label>
-      <button class="btn pri" id="go">Get pair code</button>
-      <div class="err" id="err" role="alert" hidden></div>
-      <div class="tk" id="tk" aria-live="polite"><div class="tt"><span>ADMIT ONE</span><small>SHAGGY XMD v4</small></div><div class="perf"></div><div class="code" id="code"></div><p class="tm" id="tm"></p><button class="btn" id="copy">Copy code</button></div>
-      <p class="aft" id="aft" hidden>Linked? Send <b>.set</b> to your bot to see and change its settings. Commands need an active subscription: <a href="https://wa.me/94784224161" target="_blank" rel="noopener" style="color:var(--amber)">message the owner</a>.</p>
-    </section>
-    <section class="card"><h2>Enter the code in WhatsApp</h2>
-      <ol class="how" style="margin-top:8px"><li>Open WhatsApp on the phone that has this number.</li><li>Go to Settings, then Linked devices.</li><li>Tap Link a device, then Link with phone number instead.</li><li>Type the 8 character code. It expires quickly, so open WhatsApp first.</li><li>Wait for the welcome message, then send .menu.</li></ol>
-    </section>
-  </div>
-</div></main>
 
-<footer class="foot"><div class="w"><span>SHAGGY XMD v4. Powered by Shaggy Tech.</span><span>Need a subscription? <a href="https://wa.me/94784224161" target="_blank" rel="noopener">Message the owner</a></span></div></footer>
-<div class="toast" id="toast" role="status"></div>
+<!-- ================= PAIR PAGE ================= -->
+
+<main id="pairPage" class="page">
+
+<div class="container">
+
+  <div class="section-label">SHAGGY XMD PAIRING</div>
+
+  <h1 class="page-title">
+    Connect <span>WhatsApp</span>
+  </h1>
+
+  <p class="section-desc">
+    ඔබගේ WhatsApp account එක SHAGGY XMD වෙත connect කරන්න.
+    <br>
+    Enter your number and generate your secure 8-character pairing code.
+  </p>
+
+
+  <div class="pair-layout">
+
+
+    <!-- FORM -->
+
+    <section class="card">
+
+      <h2>📱 WhatsApp Number</h2>
+
+      <p class="card-sub">
+        Number එක country code සමඟ ඇතුළත් කරන්න.
+      </p>
+
+
+      <div class="field">
+
+        <label for="phone">
+          WhatsApp Number / WhatsApp අංකය
+        </label>
+
+        <input
+          id="phone"
+          class="input"
+          type="tel"
+          inputmode="numeric"
+          maxlength="15"
+          autocomplete="tel"
+          placeholder="94768069800">
+
+        <div class="hint">
+          Example: 94768069800
+          <br>
+          ❌ +94 / spaces නොදමන්න.
+        </div>
+
+      </div>
+
+
+      <label class="check">
+
+        <input type="checkbox" id="terms" checked>
+
+        <span>
+          I understand that this will link my WhatsApp account
+          to SHAGGY XMD.
+          <br>
+          මම මගේ WhatsApp account එක bot එකට link කරන බව තේරුම් ගනිමි.
+        </span>
+
+      </label>
+
+
+      <button class="btn primary pair-btn" id="go">
+        🔐 Get Pair Code
+      </button>
+
+
+      <div class="error" id="error"></div>
+
+
+      <!-- TICKET -->
+
+      <div class="ticket" id="ticket">
+
+        <div class="ticket-title">
+          SHAGGY XMD • PAIR CODE
+        </div>
+
+        <div class="pair-code loading" id="pairCode">
+          Generating...
+        </div>
+
+        <div class="ticket-info" id="pairInfo">
+          Please wait...
+        </div>
+
+        <button class="copy" id="copy">
+          📋 Copy Pair Code
+        </button>
+
+      </div>
+
+    </section>
+
+
+    <!-- GUIDE -->
+
+    <section class="card">
+
+      <h2>📖 How to connect?</h2>
+
+      <p class="card-sub">
+        WhatsApp එකෙන් මේ steps follow කරන්න.
+      </p>
+
+
+      <ol class="guide">
+
+        <li>
+          <div>
+            <strong>WhatsApp open කරන්න</strong>
+            <span>
+              Open WhatsApp on the phone containing this number.
+            </span>
+          </div>
+        </li>
+
+        <li>
+          <div>
+            <strong>Linked Devices වෙත යන්න</strong>
+            <span>
+              WhatsApp → Settings → Linked Devices.
+            </span>
+          </div>
+        </li>
+
+        <li>
+          <div>
+            <strong>Link with phone number</strong>
+            <span>
+              Tap Link a device → Link with phone number instead.
+            </span>
+          </div>
+        </li>
+
+        <li>
+          <div>
+            <strong>Pair Code එක ඇතුළත් කරන්න</strong>
+            <span>
+              Website එකේ පෙන්වන 8-character code එක type කරන්න.
+            </span>
+          </div>
+        </li>
+
+        <li>
+          <div>
+            <strong>Done! 🎉</strong>
+            <span>
+              Welcome message එක ලැබුණාම .menu යවලා bot එක start කරන්න.
+            </span>
+          </div>
+        </li>
+
+      </ol>
+
+    </section>
+
+  </div>
+
+</div>
+
+</main>
+
+
+<!-- ================= FOOTER ================= -->
+
+<footer class="footer">
+<div class="container footer-inner">
+
+  <div>
+    <b>SHAGGY XMD</b> v4
+    <br>
+    Premium WhatsApp Bot
+  </div>
+
+  <div>
+    Powered by <b>Shaggy Tech</b> • © 2026
+  </div>
+
+</div>
+</footer>
+
+
+<div class="toast" id="toast"></div>
+
 
 <script>
 (function(){
-var $=function(i){return document.getElementById(i)},V=['home','pair'],rm=matchMedia('(prefers-reduced-motion: reduce)').matches,played=false,tt;
-function toast(m){var t=$('toast');t.textContent=m;t.className='toast on';clearTimeout(tt);tt=setTimeout(function(){t.className='toast'},2400)}
-function cur(){var h=location.hash.replace('#/','');return V.indexOf(h)>-1?h:(location.pathname.replace(/\/+$/,'')==='/pair'?'pair':'home')}
-function render(){var v=cur();V.forEach(function(n){$('v-'+n).classList.toggle('on',n===v)});
- document.querySelectorAll('.tab').forEach(function(b){b.dataset.go===v?b.setAttribute('aria-current','page'):b.removeAttribute('aria-current')});
- window.scrollTo(0,0);if(v==='home'){chat();count()}document.title=(v==='pair'?'Pair Web':'WhatsApp movie bot')+' | SHAGGY XMD'}
-document.addEventListener('click',function(e){var s=e.target.closest('[data-scroll]');if(s){e.preventDefault();var t=$(s.dataset.scroll);t&&t.scrollIntoView({behavior:rm?'auto':'smooth'});return}
- var g=e.target.closest('[data-go]');if(!g)return;e.preventDefault();var v=g.dataset.go;location.hash==='#/'+v?render():location.hash='#/'+v});
-addEventListener('hashchange',render);
 
-/* status: one fetch on load, then once every 5 minutes (single timer, paused while the tab is hidden) */
-var last=0;
-function status(){last=Date.now();fetch('/code/status',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){$('dot').className='dot on';$('live').textContent='Online, '+d.bots+(d.bots===1?' bot':' bots')+' running'}).catch(function(){$('dot').className='dot off';$('live').textContent='Server unreachable'})}
-status();setInterval(function(){if(!document.hidden)status()},300000);
-document.addEventListener('visibilitychange',function(){if(!document.hidden&&Date.now()-last>300000)status()});
+const $ = id => document.getElementById(id);
 
-/* counters: run once */
-var counted=false;
-function count(){if(counted)return;counted=true;document.querySelectorAll('[data-n]').forEach(function(el){var n=+el.dataset.n;if(rm){el.textContent=n;return}var s=performance.now();(function f(t){var p=Math.min((t-s)/900,1);el.textContent=Math.round(n*(1-Math.pow(1-p,3)));if(p<1)requestAnimationFrame(f)})(s)})}
+const pages = {
+  home: $("homePage"),
+  pair: $("pairPage")
+};
 
-/* chat demo: plays once */
-function add(c,t,x){var m=document.createElement('div');m.className='m '+c;m.textContent=t;if(x)m.appendChild(x);$('chat').appendChild(m)}
-function chat(){if(played)return;played=true;
- var pk=document.createElement('span');pk.className='pick';pk.textContent='📋 Select';
- var f=document.createElement('div');f.className='fl';f.innerHTML='<span style="font-size:22px">🎞️</span><div>Vikings S01E01 720p.mp4<small>412 MB</small></div>';
- var S=[function(){add('me','.movie vikings')},function(){add('bot','🔍 Searching for vikings...')},function(){add('bot','🎬 Results\n1. Vikings (2013)\n2. Vikings: Valhalla (2022)\n3. Vikings: Wolf Wars (2015)',pk)},function(){add('me','1. Vikings (2013)')},function(){add('bot','⏳ Downloading, about 2 minutes.')},function(){add('bot','✅ Sent to your chat',f)}];
- if(rm){S.forEach(function(s){s()});return}var t=300;S.forEach(function(s,i){setTimeout(s,t);t+=(i===1||i===4)?1500:1100})}
+const navButtons = document.querySelectorAll("[data-page]");
 
-/* pair */
-var ph=$('phone');ph.addEventListener('input',function(){ph.value=ph.value.replace(/\D/g,'')});
-function err(m){var e=$('err');e.textContent=m;e.hidden=!m}
-function fmt(c){return /^[A-Za-z0-9]{8}$/.test(c)?c.slice(0,4)+'-'+c.slice(4):c}
-function copy(q){var r=$('code').dataset.raw;if(!r)return;function ok(){toast('Code copied')}function bad(){q||toast('Copy failed, select the code by hand')}
- if(navigator.clipboard&&isSecureContext)navigator.clipboard.writeText(r).then(ok,bad);else{var a=document.createElement('textarea');a.value=r;a.style.cssText='position:fixed;opacity:0';document.body.appendChild(a);a.select();try{document.execCommand('copy');ok()}catch(e){bad()}document.body.removeChild(a)}}
-$('copy').addEventListener('click',function(){copy(false)});
-$('go').addEventListener('click',function(){err('');var n=ph.value.trim();
- if(!$('terms').checked){err('Tick the box to continue.');return}
- if(n.length<9){err('Enter your full number with country code, for example 94768069800.');ph.focus();return}
- var b=$('go'),k=$('tk'),c=$('code');b.disabled=true;b.textContent='Requesting code...';k.classList.add('on');c.className='code ld';c.textContent='Generating your code...';$('tm').textContent='';$('aft').hidden=true;
- fetch('/code?number='+encodeURIComponent(n)).then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d}})}).then(function(x){
-  if(x.ok&&x.d.code){c.className='code';c.textContent=fmt(x.d.code);c.dataset.raw=x.d.code;$('tm').textContent='Type this in WhatsApp under Linked devices.';$('aft').hidden=false;copy(true)}
-  else{k.classList.remove('on');err((x.d&&x.d.error)||'The server could not create a code. Try again in a minute.')}
- }).catch(function(){k.classList.remove('on');err('Could not reach the server. Check your connection and try again.')}).finally(function(){b.disabled=false;b.textContent='Get pair code'})});
-render();
+let toastTimer;
+
+
+/* ================= PAGE NAVIGATION ================= */
+
+function showPage(page){
+
+  if(!pages[page]) page="home";
+
+  Object.keys(pages).forEach(key=>{
+    pages[key].classList.toggle("active",key===page);
+  });
+
+  document.querySelectorAll(".nav-btn").forEach(btn=>{
+    btn.classList.toggle(
+      "active",
+      btn.dataset.page===page
+    );
+  });
+
+  window.scrollTo({
+    top:0,
+    behavior:"smooth"
+  });
+
+  history.replaceState(null,"",page==="pair" ? "#/pair" : "#/home");
+}
+
+
+navButtons.forEach(btn=>{
+  btn.addEventListener("click",()=>{
+    showPage(btn.dataset.page);
+  });
+});
+
+
+window.addEventListener("hashchange",()=>{
+
+  const hash=location.hash.replace("#/","");
+
+  showPage(hash==="pair" ? "pair" : "home");
+
+});
+
+
+/* ================= SERVER STATUS ================= */
+
+let lastStatus=0;
+
+async function checkStatus(){
+
+  lastStatus=Date.now();
+
+  try{
+
+    const response=await fetch(
+      "/code/status",
+      {cache:"no-store"}
+    );
+
+    if(!response.ok) throw new Error();
+
+    const data=await response.json();
+
+    $("statusDot").className="status-dot online";
+
+    $("statusText").textContent=
+      data.bots
+      ? "Online • "+data.bots+" bot"+(data.bots===1?"":"s")
+      : "Online";
+
+  }catch(error){
+
+    $("statusDot").className="status-dot offline";
+
+    $("statusText").textContent="Server Offline";
+
+  }
+}
+
+
+checkStatus();
+
+setInterval(()=>{
+
+  if(!document.hidden){
+    checkStatus();
+  }
+
+},300000);
+
+
+/* ================= CHAT DEMO ================= */
+
+const chat=$("chat");
+
+function message(type,text){
+
+  const div=document.createElement("div");
+
+  div.className="message "+type;
+
+  div.textContent=text;
+
+  chat.appendChild(div);
+
+}
+
+function fileMessage(){
+
+  const div=document.createElement("div");
+
+  div.className="message bot";
+
+  div.innerHTML=
+    "✅ Download completed"+
+    '<div class="file">'+
+      '<span style="font-size:21px">🎬</span>'+
+      '<div>'+
+        '<b>Vikings S01E01.mp4</b>'+
+        '<small>720p • 412 MB</small>'+
+      '</div>'+
+    '</div>';
+
+  chat.appendChild(div);
+
+}
+
+function runDemo(){
+
+  const steps=[
+    ()=>message("me",".movie vikings"),
+    ()=>message("bot","🔍 Searching for Vikings..."),
+    ()=>message(
+      "bot",
+      "🎬 Search results\n\n1. Vikings (2013)\n2. Vikings: Valhalla\n3. Vikings: Wolf Wars"
+    ),
+    ()=>message("me","1. Vikings (2013)"),
+    ()=>message("bot","⏳ Preparing your file..."),
+    ()=>fileMessage()
+  ];
+
+  let delay=400;
+
+  steps.forEach((step,index)=>{
+
+    setTimeout(step,delay);
+
+    delay += index===1 || index===4 ? 1300 : 900;
+
+  });
+
+}
+
+runDemo();
+
+
+/* ================= PHONE INPUT ================= */
+
+const phone=$("phone");
+
+phone.addEventListener("input",()=>{
+
+  phone.value=phone.value.replace(/\D/g,"");
+
+});
+
+
+/* ================= TOAST ================= */
+
+function toast(text){
+
+  const el=$("toast");
+
+  el.textContent=text;
+
+  el.classList.add("show");
+
+  clearTimeout(toastTimer);
+
+  toastTimer=setTimeout(()=>{
+    el.classList.remove("show");
+  },2500);
+
+}
+
+
+/* ================= ERROR ================= */
+
+function showError(text){
+
+  const el=$("error");
+
+  el.textContent=text;
+
+  el.style.display=text ? "block" : "none";
+
+}
+
+
+/* ================= PAIR CODE FORMAT ================= */
+
+function formatCode(code){
+
+  if(/^[A-Za-z0-9]{8}$/.test(code)){
+
+    return code.slice(0,4)+"-"+code.slice(4);
+
+  }
+
+  return code;
+
+}
+
+
+/* ================= COPY ================= */
+
+function copyCode(){
+
+  const raw=$("pairCode").dataset.raw;
+
+  if(!raw) return;
+
+  if(navigator.clipboard && window.isSecureContext){
+
+    navigator.clipboard.writeText(raw)
+      .then(()=>toast("✅ Pair code copied!"))
+      .catch(()=>toast("Copy failed"));
+
+    return;
+  }
+
+  const textarea=document.createElement("textarea");
+
+  textarea.value=raw;
+
+  textarea.style.position="fixed";
+  textarea.style.opacity="0";
+
+  document.body.appendChild(textarea);
+
+  textarea.select();
+
+  try{
+
+    document.execCommand("copy");
+
+    toast("✅ Pair code copied!");
+
+  }catch(e){
+
+    toast("Please copy the code manually");
+
+  }
+
+  textarea.remove();
+
+}
+
+$("copy").addEventListener("click",copyCode);
+
+
+/* ================= PAIR REQUEST ================= */
+
+$("go").addEventListener("click",async()=>{
+
+  showError("");
+
+  const number=phone.value.trim();
+
+  if(!$("terms").checked){
+
+    showError(
+      "Please confirm that you understand the WhatsApp linking process."
+    );
+
+    return;
+
+  }
+
+  if(number.length<9){
+
+    showError(
+      "කරුණාකර country code සමඟ සම්පූර්ණ WhatsApp number එක ඇතුළත් කරන්න. Example: 94768069800"
+    );
+
+    phone.focus();
+
+    return;
+
+  }
+
+
+  const button=$("go");
+  const ticket=$("ticket");
+  const code=$("pairCode");
+  const info=$("pairInfo");
+
+  button.disabled=true;
+
+  button.textContent="⏳ Generating Pair Code...";
+
+  ticket.classList.add("show");
+
+  code.className="pair-code loading";
+
+  code.textContent="Generating...";
+
+  code.dataset.raw="";
+
+  info.textContent="Connecting to SHAGGY XMD server...";
+
+
+  try{
+
+    const response=await fetch(
+      "/code?number="+encodeURIComponent(number)
+    );
+
+    let data={};
+
+    try{
+      data=await response.json();
+    }catch(e){}
+
+
+    if(response.ok && data.code){
+
+      code.className="pair-code";
+
+      code.textContent=formatCode(data.code);
+
+      code.dataset.raw=data.code;
+
+      info.textContent=
+        "WhatsApp → Linked Devices → Link with phone number instead";
+
+      try{
+
+        await navigator.clipboard.writeText(data.code);
+
+        toast("🎉 Pair code generated & copied!");
+
+      }catch(e){
+
+        toast("🎉 Pair code generated!");
+
+      }
+
+    }else{
+
+      ticket.classList.remove("show");
+
+      showError(
+        data.error ||
+        "Server could not generate a pair code. Please try again."
+      );
+
+    }
+
+  }catch(error){
+
+    ticket.classList.remove("show");
+
+    showError(
+      "Could not reach the server. Please check your connection and try again."
+    );
+
+  }finally{
+
+    button.disabled=false;
+
+    button.textContent="🔐 Get Pair Code";
+
+  }
+
+});
+
+
+/* ================= INITIAL PAGE ================= */
+
+const initialHash=location.hash.replace("#/","");
+
+showPage(initialHash==="pair" ? "pair" : "home");
+
 })();
 </script>
+
 </body>
 </html>
