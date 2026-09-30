@@ -870,13 +870,65 @@ async function cineFallbackEpisodeLink(showUrl, epList, selectedEpisode) {
     return { url: (nonT[0] || arr[0]).link };
 }
 
+// 📢 Baileys 7.0.0-rc14 bug: channel (newsletter) media wala upload path eka waradi (/mms/...), eka nisa WhatsApp eken ack 479 dena.
+// Sahi path eka (/newsletter/newsletter-<type>) + server_thumb_gen=1 use karana upload function ekak.
+const NEWSLETTER_UPLOAD_PATHS = {
+    image: '/newsletter/newsletter-image',
+    video: '/newsletter/newsletter-video',
+    audio: '/newsletter/newsletter-audio',
+    document: '/newsletter/newsletter-document',
+    sticker: '/newsletter/newsletter-image'
+};
+
+async function getMediaConnFor(socket) {
+    if (typeof socket.refreshMediaConn === 'function') return await socket.refreshMediaConn(false);
+    // fallback: media_conn IQ eka ekama hadagannawa
+    const result = await socket.query({ tag: 'iq', attrs: { type: 'set', xmlns: 'w:m', to: '@s.whatsapp.net' }, content: [{ tag: 'media_conn', attrs: {} }] });
+    const node = BaileysNS.getBinaryNodeChild(result, 'media_conn');
+    return {
+        auth: node.attrs.auth,
+        hosts: BaileysNS.getBinaryNodeChildren(node, 'host').map(h => ({ hostname: h.attrs.hostname }))
+    };
+}
+
+function makeNewsletterUpload(socket) {
+    return async (filePath, { mediaType, fileEncSha256B64, timeoutMs } = {}) => {
+        const info = await getMediaConnFor(socket);
+        if (!info?.auth || !info?.hosts?.length) throw new Error('Media upload server details ganna baha una');
+        const token = encodeURIComponent(String(fileEncSha256B64).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''));
+        const path = NEWSLETTER_UPLOAD_PATHS[mediaType] || `/newsletter/newsletter-${mediaType}`;
+        let lastErr = null;
+        for (const { hostname } of info.hosts) {
+            try {
+                const url = `https://${hostname}${path}/${token}?auth=${encodeURIComponent(info.auth)}&token=${token}&server_thumb_gen=1`;
+                const res = await axios.post(url, fs.createReadStream(filePath), {
+                    headers: { 'Content-Type': 'application/octet-stream', Origin: 'https://web.whatsapp.com' },
+                    timeout: timeoutMs || 120000,
+                    maxBodyLength: Infinity,
+                    maxContentLength: Infinity,
+                    responseType: 'json'
+                });
+                const d = res.data;
+                if (d?.url || d?.direct_path) return { mediaUrl: d.url, directPath: d.direct_path };
+                lastErr = new Error('Upload response eke url eka na');
+            } catch (e) {
+                lastErr = e;
+            }
+        }
+        throw lastErr || new Error('Channel media upload fail una');
+    };
+}
+
 // 📢 Channel ekata yawala WhatsApp eken reject kalada balanawa (ack error) - "yawwa" kiyala hariyata kiyanna
 async function sendToChannelChecked(socket, jid, content) {
     const id = BaileysNS.generateMessageIDV2 ? BaileysNS.generateMessageIDV2(socket.user?.id) : BaileysNS.generateMessageID();
     let ackErr = null;
     const onAck = (node) => { if (node?.attrs?.error) ackErr = node.attrs.error; };
     try { socket.ws.on('TAG:' + id, onAck); } catch { /* ignore */ }
-    const sent = await socket.sendMessage(jid, content, { messageId: id });
+    const isMedia = ['image', 'video', 'audio', 'document', 'sticker'].some(k => content && content[k] !== undefined);
+    const sent = await socket.sendMessage(jid, content, isMedia
+        ? { messageId: id, upload: makeNewsletterUpload(socket) } // sahi channel upload path eka
+        : { messageId: id });
     await new Promise(r => setTimeout(r, 4000));
     try { socket.ws.off('TAG:' + id, onAck); } catch { /* ignore */ }
     if (ackErr) {
