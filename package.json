@@ -1,6 +1,6 @@
 {
   "name": "test-md",
-  "version": "1.0.0",
+  "version": "4.0.0",
   "type": "module",
   "description": "WhatsApp Bot with Multi-Number Support",
   "main": "index.js",
@@ -29,5 +29,8 @@
     "multi-device",
     "baileys"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "optionalDependencies": {
+    "chama-bailez-pro": "3.3.2"
+  }
 }
