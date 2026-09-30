@@ -879,7 +879,10 @@ async function sendToChannelChecked(socket, jid, content) {
     const sent = await socket.sendMessage(jid, content, { messageId: id });
     await new Promise(r => setTimeout(r, 4000));
     try { socket.ws.off('TAG:' + id, onAck); } catch { /* ignore */ }
-    if (ackErr) throw new Error(`WhatsApp channel post eka reject kala (code ${ackErr}). Bot number eka channel eke admin/owner nemei wage.`);
+    if (ackErr) {
+        const adminHint = ['401', '403'].includes(String(ackErr)) ? ' Bot number eka channel eke admin/owner nemei wage.' : '';
+        throw new Error(`WhatsApp channel post eka reject kala (code ${ackErr}).${adminHint}`);
+    }
     return sent;
 }
 
@@ -1294,18 +1297,43 @@ async function setupCommandHandlers(socket, number) {
 
 > 🎭 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 🎭`;
 
-                    await sendToChannelChecked(socket, channelJid, { image: { url: thumb }, caption });
-                    await sendToChannelChecked(socket, channelJid, { audio: audioBuf, mimetype: 'audio/mpeg', ptt: false });
+                    // step-by-step: eka step ekak reject unath anith ewa yanawa; kohe fail unada penawa
+                    const stepLog = [];
+                    const tryStep = async (label, content) => {
+                        try {
+                            await sendToChannelChecked(socket, channelJid, content);
+                            stepLog.push(`✅ ${label}`);
+                            return true;
+                        } catch (stepErr) {
+                            console.error(`[csong] ${label} failed:`, stepErr.message);
+                            const code = (stepErr.message.match(/code (\d+)/) || [])[1];
+                            stepLog.push(`❌ ${label}${code ? ` (code ${code})` : `: ${stepErr.message.slice(0, 50)}`}`);
+                            return false;
+                        }
+                    };
 
-                    await socket.sendMessage(sender, { react: { text: '✅', key: msg.key } });
+                    // 1) description: image + caption, nathnam text witharak
+                    let descOk = await tryStep('Description (image)', { image: { url: thumb }, caption });
+                    if (!descOk) descOk = await tryStep('Description (text)', { text: caption });
+
+                    // 2) mp3: audio, nathnam audio/mp4, nathnam file ekak widihata
+                    let audioOk = await tryStep('MP3 (audio)', { audio: audioBuf, mimetype: 'audio/mpeg', ptt: false });
+                    if (!audioOk) audioOk = await tryStep('MP3 (audio/mp4)', { audio: audioBuf, mimetype: 'audio/mp4', ptt: false });
+                    if (!audioOk) audioOk = await tryStep('MP3 (file)', { document: audioBuf, mimetype: 'audio/mpeg', fileName: `${songTitle}.mp3` });
+
+                    if (!descOk && !audioOk) {
+                        throw new Error(`Channel eka kisima post ekak accept kale na.\n\n${stepLog.join('\n')}`);
+                    }
+
+                    await socket.sendMessage(sender, { react: { text: descOk && audioOk ? '✅' : '⚠️', key: msg.key } });
                     await socket.sendMessage(sender, {
-                        text: `✅ *Channel ekata post kala!*\n\n🎵 ${songTitle}\n📢 ${channelName}`
+                        text: `${descOk && audioOk ? '✅ *Channel ekata post kala!*' : '⚠️ *Podi issues ekka post kala*'}\n\n🎵 ${songTitle}\n📢 ${channelName}\n\n${stepLog.join('\n')}`
                     }, { quoted: msg });
                 } catch (csErr) {
                     console.error('[csong] error:', csErr.message);
                     await socket.sendMessage(sender, { react: { text: '❌', key: msg.key } }).catch(() => {});
                     let hint = '';
-                    if (/forbidden|not.?authorized|401|403|admin|permission/i.test(csErr.message)) hint = '\n\n_Bot number eka meka channel eke admin/owner nemei wage._';
+                    if (/code (401|403)\b/.test(csErr.message) && !/admin/i.test(csErr.message)) hint = '\n\n_Bot number eka meka channel eke admin/owner nemei wage._';
                     await socket.sendMessage(sender, { text: `❌ *CSONG Error:* ${csErr.message}${hint}` }, { quoted: msg });
                 }
                 break;
