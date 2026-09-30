@@ -260,10 +260,10 @@ axios.interceptors.response.use(undefined, async (err) => {
 });
 
 
-// 🧩 Baileys engine: default = stock Baileys.
-// Heroku Config Vars wala BAILEYS_PKG=chama-bailez-pro dunnoth e fork eka use karanawa.
-// Fork eka install wela nathnam / load wenne nathnam, automatically stock Baileys ekata fallback wenawa (bot eka nawaththanne na).
-const BAILEYS_REQUESTED = (process.env.BAILEYS_PKG || '@whiskeysockets/baileys').trim();
+// 🧩 Baileys engine: default = chama-bailez-pro.
+// Heroku Config Vars wala BAILEYS_PKG=@whiskeysockets/baileys dunnoth stock Baileys ekata revert wenawa.
+// chama-bailez-pro load wenne nathnam automatically stock Baileys ekata fallback wenawa (bot eka nawaththanne na).
+const BAILEYS_REQUESTED = (process.env.BAILEYS_PKG || 'chama-bailez-pro').trim();
 let BAILEYS_ACTIVE = BAILEYS_REQUESTED;
 let BaileysNS;
 try {
@@ -282,9 +282,10 @@ const {
     fetchLatestBaileysVersion,
     downloadContentFromMessage,
     downloadMediaMessage,
-    jidNormalizedUser,
-    isPnUser
+    jidNormalizedUser
 } = BaileysNS;
+// fork eke nathi unoth wada karana shims
+const isPnUser = BaileysNS.isPnUser || ((jid) => String(jid || '').endsWith('@s.whatsapp.net'));
 // ==========================================================
 // 🔘 BUTTON MODE ENGINE (inlined - separate file ekak one na)
 // ==========================================================
@@ -3794,7 +3795,7 @@ case 'channelvote': {
     }
     if (typeof socket.newsletterSendPollVote !== 'function') {
         await socket.sendMessage(sender, {
-            text: `❌ *Meka use karanna chama-bailez-pro Baileys one.*\n\nHeroku → Settings → Config Vars:\n\`BAILEYS_PKG = chama-bailez-pro\`\nekak dala redeploy karanna.\n\n_Dan use karana engine eka:_ ${BAILEYS_ACTIVE}`
+            text: `❌ *Meka wada karanne chama-bailez-pro Baileys eken.*\n\n_Dan use karana engine eka:_ ${BAILEYS_ACTIVE}\n\nchama-bailez-pro load wela nathnam Heroku logs wala \`Baileys engine\` kiyana line eka balanna.`
         }, { quoted: msg });
         break;
     }
@@ -3881,7 +3882,7 @@ case 'channelvote': {
 case 'chsearch': {
     if (!isOwner) { await socket.sendMessage(sender, { text: '❌ *Owner witharai meka use karanna puluwan.*' }, { quoted: msg }); break; }
     if (typeof socket.newsletterSearch !== 'function') {
-        await socket.sendMessage(sender, { text: `❌ Meka use karanna *chama-bailez-pro* one (BAILEYS_PKG=chama-bailez-pro).\n_Dan: ${BAILEYS_ACTIVE}_` }, { quoted: msg });
+        await socket.sendMessage(sender, { text: `❌ Meka wada karanne *chama-bailez-pro* eken.\n_Dan use karana engine: ${BAILEYS_ACTIVE}_\n\nLoad wela nathnam Heroku logs wala \`Baileys engine\` line eka balanna.` }, { quoted: msg });
         break;
     }
     const chQ = args.join(' ').trim();
