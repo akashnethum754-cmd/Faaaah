@@ -29,8 +29,5 @@
     "multi-device",
     "baileys"
   ],
-  "license": "MIT",
-  "optionalDependencies": {
-    "chama-bailez-pro": "3.3.2"
-  }
+  "license": "MIT"
 }
