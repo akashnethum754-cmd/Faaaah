@@ -260,8 +260,22 @@ axios.interceptors.response.use(undefined, async (err) => {
 });
 
 
-import {
-    default as makeWASocket,
+// 🧩 Baileys engine: default = stock Baileys.
+// Heroku Config Vars wala BAILEYS_PKG=chama-bailez-pro dunnoth e fork eka use karanawa.
+// Fork eka install wela nathnam / load wenne nathnam, automatically stock Baileys ekata fallback wenawa (bot eka nawaththanne na).
+const BAILEYS_REQUESTED = (process.env.BAILEYS_PKG || '@whiskeysockets/baileys').trim();
+let BAILEYS_ACTIVE = BAILEYS_REQUESTED;
+let BaileysNS;
+try {
+    BaileysNS = await import(BAILEYS_REQUESTED);
+} catch (engineErr) {
+    console.error(`⚠️ Baileys engine "${BAILEYS_REQUESTED}" load wenne na (${engineErr.message}). Stock Baileys use karanawa.`);
+    BAILEYS_ACTIVE = '@whiskeysockets/baileys';
+    BaileysNS = await import('@whiskeysockets/baileys');
+}
+console.log(`🧩 Baileys engine: ${BAILEYS_ACTIVE}`);
+const makeWASocket = BaileysNS.default?.default || BaileysNS.default || BaileysNS.makeWASocket;
+const {
     useMultiFileAuthState,
     delay,
     Browsers,
@@ -270,11 +284,10 @@ import {
     downloadMediaMessage,
     jidNormalizedUser,
     isPnUser
-} from '@whiskeysockets/baileys';
+} = BaileysNS;
 // ==========================================================
 // 🔘 BUTTON MODE ENGINE (inlined - separate file ekak one na)
 // ==========================================================
-import * as BaileysNS from '@whiskeysockets/baileys';
 const { installButtonMode, sendList, extractIncoming, isReplyTo, sameChat, unwrap } = (() => {
 const B = BaileysNS;
 // ==========================================================
@@ -827,6 +840,8 @@ function pickBotImage(sc) {
 // ==========================================================
 // 🎬 CineSubz download helpers (laksidu API 500 dunnoth chamindu API ekata fallback wenawa)
 // ==========================================================
+const voteInviteCache = new Map();
+const votePollCache = new Map();
 const CINE_FB_BASE = 'https://api.chamindu.site';
 const CINE_FB_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
 const cineNorm = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -2665,6 +2680,11 @@ case 'help': {
                 cmds: [
                     ['song', 'Song / YouTube audio'],
                     ['csong', 'Song -> channel post (owner)'],
+                    ['vote', 'Channel poll vote (owner)'],
+                    ['chsearch', 'Channel search (owner)'],
+                    ['chfollow', 'Channel follow (owner)'],
+                    ['chunfollow', 'Channel unfollow (owner)'],
+                    ['chreact', 'Channel post react (owner)'],
                     ['yt', 'YouTube video / audio'],
                     ['tiktok', 'TikTok (no watermark)'],
                     ['mediafire', 'MediaFire files  🆕'],
@@ -3761,6 +3781,162 @@ case 'tvsend': {
         }, { quoted: msg });
     }
 
+    break;
+}
+
+case 'vote':
+case 'cvote':
+case 'channelvote': {
+    // 🗳️ Channel (newsletter) poll vote - chama-bailez-pro (newsletterSendPollVote) one. Owner witharai.
+    if (!isOwner) {
+        await socket.sendMessage(sender, { text: '❌ *Owner witharai meka use karanna puluwan.*' }, { quoted: msg });
+        break;
+    }
+    if (typeof socket.newsletterSendPollVote !== 'function') {
+        await socket.sendMessage(sender, {
+            text: `❌ *Meka use karanna chama-bailez-pro Baileys one.*\n\nHeroku → Settings → Config Vars:\n\`BAILEYS_PKG = chama-bailez-pro\`\nekak dala redeploy karanna.\n\n_Dan use karana engine eka:_ ${BAILEYS_ACTIVE}`
+        }, { quoted: msg });
+        break;
+    }
+    const vRep = (t) => socket.sendMessage(sender, { text: t }, { quoted: msg });
+    const vCtx = msg.message?.extendedTextMessage?.contextInfo;
+    let vTarget = null, vOption = null, vServerId = null;
+    if (args[0] && (args[0].includes('whatsapp.com/channel/') || args[0].endsWith('@newsletter'))) {
+        vTarget = args[0].trim();
+        if (args.length >= 3 && /^\d+$/.test(args[1].trim()) && !vTarget.match(/\/(\d+)$/)) {
+            vServerId = args[1].trim(); vOption = args.slice(2).join(' ').trim();
+        } else {
+            vOption = args.slice(1).join(' ').trim();
+        }
+    } else if (vCtx?.quotedMessage) {
+        vTarget = vCtx;
+        if (args.length >= 2 && /^\d+$/.test(args[0].trim())) { vServerId = args[0].trim(); vOption = args.slice(1).join(' ').trim(); }
+        else vOption = args.join(' ').trim();
+    }
+    if (!vTarget || !vOption) {
+        await vRep(`🗳️ *Channel Poll Vote*\n\n*Use:*\n• \`${sessionConfig.PREFIX || '.'}vote <channel link>/<serverId> <option / number>\`\n• Poll ekakata reply karala \`${sessionConfig.PREFIX || '.'}vote <option / number>\`\n\n*Example:*\n\`${sessionConfig.PREFIX || '.'}vote https://whatsapp.com/channel/0029VbCi5BT5a23yioUIOp1w/683 1\``);
+        break;
+    }
+    try {
+        await vRep('⏳ *Vote karanawa...*');
+        let vJid = null, vOptions = null, vTitle = null;
+        if (typeof vTarget === 'object') {
+            vJid = vTarget.forwardedNewsletterMessageInfo?.newsletterJid || vTarget.remoteJid;
+            vServerId = (vTarget.forwardedNewsletterMessageInfo?.serverMessageId || vTarget.stanzaId || vTarget.server_id)?.toString();
+            const qp = vTarget.quotedMessage?.pollCreationMessage || vTarget.quotedMessage?.pollCreationMessageV3;
+            if (qp) { vOptions = (qp.options || []).map(o => o.optionName); vTitle = qp.name; }
+        } else {
+            const lm = vTarget.match(/(?:https?:\/\/)?(?:www\.)?whatsapp\.com\/channel\/([a-zA-Z0-9_-]+)(?:\/(\d+))?/i);
+            if (lm) {
+                if (lm[2]) vServerId = lm[2];
+                if (voteInviteCache.has(lm[1])) vJid = voteInviteCache.get(lm[1]);
+                else {
+                    const vm = await socket.newsletterMetadata('invite', lm[1]);
+                    vJid = vm?.id || vm?.jid;
+                    if (vJid) voteInviteCache.set(lm[1], vJid);
+                }
+            } else if (vTarget.endsWith('@newsletter')) vJid = vTarget;
+        }
+        if (!vJid || !vServerId) { await vRep('❌ Channel eka ho poll message ID (/serverId) eka hoyaganna baha.'); break; }
+
+        const vKey = `${vJid}_${vServerId}`;
+        if (votePollCache.has(vKey)) {
+            const c = votePollCache.get(vKey); vOptions = c.options; vTitle = c.name;
+        } else if (!vOptions) {
+            const fr = await socket.query({
+                tag: 'iq',
+                attrs: { id: socket.generateMessageTag(), type: 'get', xmlns: 'newsletter', to: 's.whatsapp.net' },
+                content: [{ tag: 'messages', attrs: { type: 'jid', jid: vJid, count: '40' } }]
+            });
+            const mn = fr?.content?.[0];
+            const found = Array.isArray(mn?.content) ? mn.content.find(m => m.tag === 'message' && String(m.attrs?.server_id) === String(vServerId)) : null;
+            if (!found) { await vRep(`❌ Message ID "${vServerId}" e channel eke na.`); break; }
+            if (found.attrs?.edit === '8') { await vRep(`❌ Message ID "${vServerId}" admin delete karala.`); break; }
+            const pt = found.content?.find(c => c.tag === 'plaintext');
+            if (!pt?.content) { await vRep(`❌ "${vServerId}" poll ekak nemei.`); break; }
+            const buf = typeof pt.content === 'string' ? Buffer.from(pt.content, 'binary') : Buffer.from(pt.content);
+            const dec = BaileysNS.proto.Message.decode(buf);
+            const pm = dec.pollCreationMessage || dec.pollCreationMessageV2 || dec.pollCreationMessageV3;
+            if (!pm) { await vRep(`❌ "${vServerId}" poll ekak nemei.`); break; }
+            vOptions = (pm.options || []).map(o => o.optionName); vTitle = pm.name || '';
+            votePollCache.set(vKey, { options: vOptions, name: vTitle });
+        }
+        let picked = null;
+        if (/^\d+$/.test(vOption)) {
+            const i = parseInt(vOption, 10);
+            if (i < 1 || i > (vOptions?.length || 0)) { await vRep(`❌ Option #${i} na. Options: ${(vOptions || []).map((o, n) => `${n + 1}. ${o}`).join(', ')}`); break; }
+            picked = vOptions[i - 1];
+        } else {
+            picked = (vOptions || []).find(o => o.toLowerCase() === vOption.toLowerCase()) || vOption;
+        }
+        await socket.newsletterSendPollVote(vJid, vServerId, [picked]);
+        await vRep(`✅ *Vote kala!* 🎉\n\n${vTitle ? `📝 *Poll:* ${vTitle}\n` : ''}🔢 *Poll ID:* ${vServerId}\n🔘 *Option:* ${picked}`);
+    } catch (vErr) {
+        console.error('[vote] error:', vErr.message);
+        await vRep(`❌ *Vote Error:* ${vErr.message}`);
+    }
+    break;
+}
+
+case 'chsearch': {
+    if (!isOwner) { await socket.sendMessage(sender, { text: '❌ *Owner witharai meka use karanna puluwan.*' }, { quoted: msg }); break; }
+    if (typeof socket.newsletterSearch !== 'function') {
+        await socket.sendMessage(sender, { text: `❌ Meka use karanna *chama-bailez-pro* one (BAILEYS_PKG=chama-bailez-pro).\n_Dan: ${BAILEYS_ACTIVE}_` }, { quoted: msg });
+        break;
+    }
+    const chQ = args.join(' ').trim();
+    if (!chQ) { await socket.sendMessage(sender, { text: `❌ Use: \`${sessionConfig.PREFIX || '.'}chsearch <keyword>\`` }, { quoted: msg }); break; }
+    try {
+        const r = await socket.newsletterSearch(chQ);
+        const list = Array.isArray(r) ? r : (r?.result || r?.newsletters || r?.results || []);
+        if (!list.length) { await socket.sendMessage(sender, { text: `❌ "${chQ}" walata channels hamu una na.` }, { quoted: msg }); break; }
+        const lines = list.slice(0, 10).map((c, i) => {
+            const nm = c.name || c.thread_metadata?.name?.text || 'Channel';
+            const subs = c.subscribers ?? c.subscribers_count ?? c.thread_metadata?.subscribers_count ?? '';
+            const inv = c.invite || c.thread_metadata?.invite || '';
+            return `*${i + 1}.* ${nm}${subs ? ` · 👥 ${subs}` : ''}\n   ${c.id || ''}${inv ? `\n   https://whatsapp.com/channel/${inv}` : ''}`;
+        });
+        await socket.sendMessage(sender, { text: `🔎 *Channel search:* ${chQ}\n\n${lines.join('\n\n')}` }, { quoted: msg });
+    } catch (e) {
+        await socket.sendMessage(sender, { text: `❌ *chsearch Error:* ${e.message}` }, { quoted: msg });
+    }
+    break;
+}
+
+case 'chfollow':
+case 'chunfollow':
+case 'chreact': {
+    if (!isOwner) { await socket.sendMessage(sender, { text: '❌ *Owner witharai meka use karanna puluwan.*' }, { quoted: msg }); break; }
+    const chLink = (args[0] || '').trim();
+    const chM = chLink.match(/channel\/([A-Za-z0-9_-]+)(?:\/(\d+))?/);
+    if (!chM && !chLink.endsWith('@newsletter')) {
+        await socket.sendMessage(sender, { text: `❌ *Use:*\n\`${sessionConfig.PREFIX || '.'}chfollow <channel link>\`\n\`${sessionConfig.PREFIX || '.'}chunfollow <channel link>\`\n\`${sessionConfig.PREFIX || '.'}chreact <channel link>/<serverId> 🔥\`` }, { quoted: msg });
+        break;
+    }
+    try {
+        let cJid = chLink.endsWith('@newsletter') ? chLink : null;
+        let cName = 'Channel';
+        if (!cJid) {
+            const cm = await socket.newsletterMetadata('invite', chM[1]);
+            cJid = cm?.id; cName = cm?.name || cName;
+        }
+        if (!cJid) throw new Error('Channel eka hoyaganna baha');
+        if (command === 'chfollow') {
+            await socket.newsletterFollow(cJid);
+            await socket.sendMessage(sender, { text: `✅ *Follow kala:* ${cName}` }, { quoted: msg });
+        } else if (command === 'chunfollow') {
+            await socket.newsletterUnfollow(cJid);
+            await socket.sendMessage(sender, { text: `✅ *Unfollow kala:* ${cName}` }, { quoted: msg });
+        } else {
+            const sid = chM?.[2];
+            const emoji = args[1] || '🔥';
+            if (!sid) throw new Error('Link eke /serverId eka one (whatsapp.com/channel/xxxx/123)');
+            await socket.newsletterReactMessage(cJid, sid, emoji);
+            await socket.sendMessage(sender, { text: `✅ *React kala* ${emoji}\n📢 ${cName} · #${sid}` }, { quoted: msg });
+        }
+    } catch (e) {
+        await socket.sendMessage(sender, { text: `❌ *Error:* ${e.message}` }, { quoted: msg });
+    }
     break;
 }
 
