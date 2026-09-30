@@ -3,693 +3,259 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#0E1424">
-<meta name="description" content="SHAGGY XMD is a WhatsApp bot for movies, series, anime, songs and downloads. Pair your number and manage settings on the web.">
+<meta name="theme-color" content="#070A14">
+<meta name="description" content="SHAGGY XMD: a WhatsApp bot for movies, series, anime, songs and downloads. Pair your number in a minute.">
 <title>SHAGGY XMD | WhatsApp movie bot</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230E1424'/%3E%3Cpath d='M36 8 16 36h14l-4 20 22-30H34z' fill='%23FFB020'/%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;700&family=Noto+Sans+Sinhala:wght@400;600&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23FFB020'/%3E%3Cpath d='M36 8 16 36h14l-4 20 22-30H34z' fill='%232A1B00'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Hanken+Grotesk:wght@400;500;700&family=Noto+Sans+Sinhala:wght@400;600&display=swap" rel="stylesheet">
 <style>
-:root{
-  --ink:#0E1424;
-  --panel:#151D31;
-  --panel-2:#1C2743;
-  --line:#2B3756;
-  --paper:#F1EBDD;
-  --muted:#9BA5BE;
-  --amber:#FFB020;
-  --amber-deep:#2A1B00;
-  --red:#F0524F;
-  --ok:#38D39F;
-  --wa:#0B3B36;
-  --wa-in:#1B2438;
-  --r-lg:22px; --r-md:14px; --r-sm:9px;
-  --display:'Bricolage Grotesque','Noto Sans Sinhala',system-ui,sans-serif;
-  --body:'Hanken Grotesk','Noto Sans Sinhala',system-ui,-apple-system,'Segoe UI',sans-serif;
-  --film:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Crect x='8' y='9' width='12' height='10' rx='3' fill='%230E1424'/%3E%3C/svg%3E");
-}
+:root{--ink:#070A14;--panel:#0F1528;--panel2:#161F3A;--line:#242F52;--paper:#F4EEDF;--muted:#A3ADC6;--amber:#FFB020;--ember:#FF6B4A;--teal:#37D6A6;--d:'Bricolage Grotesque','Noto Sans Sinhala',system-ui,sans-serif;--b:'Hanken Grotesk','Noto Sans Sinhala',system-ui,sans-serif}
 *{box-sizing:border-box;margin:0;padding:0}
-html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
-body{background:var(--ink);color:var(--paper);font-family:var(--body);font-size:16px;line-height:1.55;min-height:100vh;overflow-x:hidden}
-a{color:inherit}
-button,input,select{font:inherit;color:inherit}
-:focus-visible{outline:3px solid var(--amber);outline-offset:3px;border-radius:6px}
-.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-
-/* ---------- top bar ---------- */
-.bar{position:sticky;top:0;z-index:30;background:rgba(14,20,36,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
-.bar-in{max-width:1180px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
-.brand{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:800;font-size:20px;letter-spacing:.01em;text-decoration:none;background:none;border:0;cursor:pointer;color:var(--paper)}
-.brand-mark{width:34px;height:34px;border-radius:10px;background:var(--amber);display:grid;place-items:center;overflow:hidden}
-.brand-mark svg{width:20px;height:20px}
-.tabs{display:flex;gap:4px;margin-left:auto;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:4px}
-.tab{background:none;border:0;padding:8px 16px;border-radius:999px;cursor:pointer;font-weight:700;font-size:14px;color:var(--muted);min-height:40px}
-.tab:hover{color:var(--paper)}
-.tab[aria-current="page"]{background:var(--paper);color:var(--ink)}
-.live{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);white-space:nowrap}
-.dot{width:9px;height:9px;border-radius:50%;background:var(--muted)}
-.dot.on{background:var(--ok);box-shadow:0 0 0 4px rgba(56,211,159,.18)}
-.dot.off{background:var(--red)}
-@media (max-width:760px){
-  .bar-in{gap:10px}
-  .tabs{order:3;width:100%;margin-left:0;justify-content:space-between}
-  .tab{flex:1;padding:8px 6px}
-  .tab .w{display:none}
-  .live{margin-left:auto}
-}
-
-/* ---------- views ---------- */
-.view{display:none}
-.view.active{display:block}
-.wrap{max-width:1180px;margin:0 auto;padding:0 20px}
-
-/* ---------- home / hero ---------- */
-.hero{padding:56px 0 64px}
-.hero-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:56px;align-items:center}
-.hero h1{font-family:var(--display);font-weight:800;font-size:clamp(38px,6vw,76px);line-height:1.02;letter-spacing:-.025em;max-width:15ch}
-.hero .si{margin-top:18px;font-size:17px;color:var(--amber);font-weight:600}
-.hero p.lead{margin-top:14px;font-size:18px;color:#CFC9BB;max-width:46ch}
-.cta-row{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:52px;padding:0 26px;border-radius:14px;border:2px solid transparent;font-weight:700;font-size:16px;cursor:pointer;text-decoration:none;transition:transform .12s ease,background .15s ease,border-color .15s ease}
+html{scroll-behavior:smooth}
+body{background:var(--ink);color:var(--paper);font:400 16px/1.55 var(--b);overflow-x:hidden;position:relative}
+body::before{content:"";position:absolute;inset:0 0 auto;height:820px;pointer-events:none;background:radial-gradient(60% 70% at 50% -8%,rgba(255,176,32,.28),transparent 70%),radial-gradient(40% 40% at 88% 22%,rgba(255,107,74,.13),transparent 70%)}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--amber);outline-offset:3px;border-radius:8px}
+.w{max-width:1160px;margin:0 auto;padding:0 20px;position:relative}
+.bar{position:sticky;top:0;z-index:20;background:rgba(7,10,20,.88);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.bar .w{display:flex;align-items:center;gap:16px;padding-top:11px;padding-bottom:11px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;background:none;border:0;cursor:pointer;font:800 20px var(--d)}
+.mark{width:36px;height:36px;border-radius:11px;background:var(--amber);display:grid;place-items:center;overflow:hidden}
+.mark img{width:100%;height:100%;object-fit:cover}
+.tabs{margin-left:auto;display:flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:4px}
+.tab{background:none;border:0;border-radius:99px;padding:8px 18px;min-height:40px;font-weight:700;font-size:14px;color:var(--muted);cursor:pointer}
+.tab[aria-current]{background:var(--paper);color:var(--ink)}
+.live{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--muted)}.dot.on{background:var(--teal);box-shadow:0 0 0 4px rgba(55,214,166,.18)}.dot.off{background:var(--ember)}
+@media(max-width:700px){.tabs{order:3;width:100%;margin:0}.tab{flex:1}.live{margin-left:auto}}
+.view{display:none}.view.on{display:block}
+.hero{padding:64px 0 72px}
+.hg{display:grid;grid-template-columns:1.1fr .9fr;gap:52px;align-items:center}
+h1{font:800 clamp(40px,6.4vw,78px)/1 var(--d);letter-spacing:-.03em;max-width:14ch}
+.si{margin-top:20px;color:var(--amber);font-weight:600;font-size:18px}
+.lead{margin-top:14px;color:#D2CCBD;font-size:18px;max-width:46ch}
+.row{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:54px;padding:0 28px;border-radius:15px;border:2px solid transparent;font-weight:700;cursor:pointer;text-decoration:none;transition:transform .12s,background .15s,border-color .15s}
 .btn:active{transform:translateY(1px)}
-.btn-primary{background:var(--amber);color:var(--amber-deep)}
-.btn-primary:hover{background:#FFC24D}
-.btn-ghost{background:transparent;border-color:var(--line);color:var(--paper)}
-.btn-ghost:hover{border-color:var(--paper)}
-.btn[disabled]{opacity:.6;cursor:not-allowed}
-.fine{margin-top:16px;font-size:14px;color:var(--muted)}
-
-/* chat demo */
-.phone{background:#0A101E;border:1px solid var(--line);border-radius:30px;padding:10px;max-width:400px;margin-left:auto;width:100%}
-.phone-head{display:flex;align-items:center;gap:10px;padding:10px 12px}
-.avatar{width:38px;height:38px;border-radius:50%;background:var(--amber);display:grid;place-items:center;font-family:var(--display);font-weight:800;color:var(--amber-deep);font-size:14px;flex:none}
-.phone-head b{display:block;font-size:15px;line-height:1.2}
-.phone-head span{font-size:12px;color:var(--ok)}
-.chat{background:#0F1729;border-radius:22px;padding:14px 12px;min-height:404px;display:flex;flex-direction:column;gap:9px}
-.msg{max-width:88%;padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.45;white-space:pre-wrap;animation:pop .22s ease-out both}
-.msg.me{align-self:flex-end;background:var(--wa);border-bottom-right-radius:4px}
-.msg.bot{align-self:flex-start;background:var(--wa-in);border-bottom-left-radius:4px}
-.msg .pick{display:block;margin:9px -12px -9px;padding:10px;border-top:1px solid var(--line);text-align:center;color:var(--amber);font-weight:700;font-size:14px}
-.file{display:flex;gap:10px;align-items:center;margin-top:7px;padding:9px 10px;border-radius:10px;background:rgba(255,255,255,.06)}
-.file i{font-style:normal;font-size:22px}
-.file small{display:block;color:var(--muted);font-size:12px}
-.typing{align-self:flex-start;display:flex;gap:4px;padding:12px 14px;background:var(--wa-in);border-radius:14px}
-.typing span{width:6px;height:6px;border-radius:50%;background:var(--muted);animation:blink 1s infinite}
-.typing span:nth-child(2){animation-delay:.15s}.typing span:nth-child(3){animation-delay:.3s}
+.pri{background:linear-gradient(135deg,#FFC24D,var(--amber) 60%,#F58F1C);color:#2A1B00;box-shadow:0 10px 30px -10px rgba(255,176,32,.6)}
+.gho{border-color:var(--line);background:rgba(255,255,255,.03)}.gho:hover{border-color:var(--paper)}
+.btn[disabled]{opacity:.6;cursor:wait}
+.stats{display:flex;gap:34px;margin-top:38px;flex-wrap:wrap}
+.stats b{display:block;font:800 38px/1 var(--d);color:var(--paper)}.stats span{font-size:13px;color:var(--muted)}
+.frame{position:relative;max-width:410px;margin-left:auto;width:100%}
+.frame::before,.frame::after{content:"";position:absolute;top:24px;bottom:24px;width:14px;background:radial-gradient(circle at 50% 50%,var(--ink) 4px,transparent 5px) 0 0/14px 26px;border-radius:4px;background-color:var(--panel2);opacity:.9}
+.frame::before{left:-30px}.frame::after{right:-30px}
+.phone{background:#080D1C;border:1px solid var(--line);border-radius:32px;padding:10px;box-shadow:0 40px 80px -30px rgba(255,176,32,.28),0 0 0 6px rgba(255,255,255,.02);transform:rotate(1.6deg)}
+.ph{display:flex;align-items:center;gap:10px;padding:10px 12px}
+.av{width:38px;height:38px;border-radius:50%;background:var(--amber);color:#2A1B00;display:grid;place-items:center;font:800 14px var(--d)}
+.ph b{display:block;line-height:1.2}.ph span{font-size:12px;color:var(--teal)}
+.chat{background:#0E1629;border-radius:22px;padding:14px 12px;min-height:400px;display:flex;flex-direction:column;gap:9px}
+.m{max-width:88%;padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.45;white-space:pre-wrap;animation:pop .25s ease-out both}
+.m.me{align-self:flex-end;background:#0B3B36;border-bottom-right-radius:4px}.m.bot{align-self:flex-start;background:#1B2540;border-bottom-left-radius:4px}
+.pick{display:block;margin:9px -12px -9px;padding:10px;border-top:1px solid var(--line);text-align:center;color:var(--amber);font-weight:700}
+.fl{display:flex;gap:10px;align-items:center;margin-top:7px;padding:9px 10px;border-radius:10px;background:rgba(255,255,255,.06)}.fl small{display:block;color:var(--muted)}
 @keyframes pop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-@keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
-@media (max-width:900px){
-  .hero{padding:36px 0 44px}
-  .hero-grid{grid-template-columns:1fr;gap:38px}
-  .phone{margin:0 auto}
-}
-
-/* film band divider */
-.band{height:28px;background:var(--panel) var(--film);background-repeat:repeat-x;border-block:1px solid var(--line)}
-
-/* sections */
-.section{padding:72px 0}
-.section h2{font-family:var(--display);font-weight:800;font-size:clamp(28px,4vw,44px);line-height:1.08;letter-spacing:-.02em}
-.section .sub{margin-top:10px;color:var(--muted);max-width:56ch}
-
-.board{margin-top:34px;display:grid;grid-template-columns:1fr 1fr;column-gap:64px}
-.row{display:flex;align-items:baseline;gap:12px;padding:16px 0;border-bottom:1px solid var(--line)}
-.row .name{font-family:var(--display);font-weight:700;font-size:20px}
-.row .lead-dots{flex:1;border-bottom:2px dotted var(--line);transform:translateY(-4px);min-width:14px}
-.row .count{font-weight:700;color:var(--amber);font-variant-numeric:tabular-nums}
-.row-desc{grid-column:1/-1;display:none}
-.board .cell{display:block}
-.cell .desc{font-size:14px;color:var(--muted);margin-top:-8px;padding-bottom:14px;border-bottom:1px solid var(--line)}
-.cell .row{border-bottom:0;padding-bottom:12px}
-@media (max-width:760px){.board{grid-template-columns:1fr}}
-
-.extras{margin-top:34px;display:grid;grid-template-columns:repeat(2,1fr);gap:34px 64px}
-.extra{border-left:4px solid var(--amber);padding-left:18px}
-.extra h3{font-family:var(--display);font-size:21px;font-weight:700}
-.extra p{margin-top:6px;color:#CFC9BB;font-size:15px}
-.extra code{background:var(--panel-2);padding:2px 7px;border-radius:6px;font-size:13px;color:var(--amber)}
-@media (max-width:760px){.extras{grid-template-columns:1fr}}
-
-.steps{margin-top:34px;display:grid;grid-template-columns:repeat(3,1fr);gap:18px;counter-reset:s;list-style:none}
-.steps li{counter-increment:s;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:26px 24px}
-.steps li::before{content:counter(s);display:grid;place-items:center;width:38px;height:38px;border-radius:50%;background:var(--paper);color:var(--ink);font-family:var(--display);font-weight:800;margin-bottom:16px}
-.steps b{display:block;font-family:var(--display);font-size:20px;margin-bottom:6px}
-.steps span{color:var(--muted);font-size:15px}
-@media (max-width:760px){.steps{grid-template-columns:1fr}}
-
-.foot{border-top:1px solid var(--line);padding:34px 0 46px;color:var(--muted);font-size:14px}
-.foot-in{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
-.foot a{color:var(--paper)}
-
-/* ---------- page heads for pair / settings ---------- */
-.page{padding-top:44px;padding-bottom:72px}
-.page h1{font-family:var(--display);font-weight:800;font-size:clamp(32px,5vw,54px);letter-spacing:-.02em;line-height:1.05}
-.page .sub{margin-top:10px;color:var(--muted);max-width:56ch}
-.split{margin-top:34px;display:grid;grid-template-columns:1.05fr .95fr;gap:36px;align-items:start}
-@media (max-width:900px){.split{grid-template-columns:1fr}}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);padding:28px}
-.card h2{font-family:var(--display);font-size:22px;font-weight:700;margin-bottom:4px}
-.field{margin-top:20px}
-.field label,.label{display:block;font-weight:700;font-size:14px;margin-bottom:8px}
+@media(max-width:900px){.hg{grid-template-columns:1fr;gap:40px}.hero{padding:40px 0 48px}.frame{margin:0 auto}.frame::before{left:-16px}.frame::after{right:-16px}}
+@media(max-width:480px){.frame::before,.frame::after{display:none}}
+.sec{padding:72px 0}
+h2{font:800 clamp(28px,4vw,44px)/1.08 var(--d);letter-spacing:-.02em}
+.sub{margin-top:10px;color:var(--muted);max-width:56ch}
+.bento{margin-top:34px;display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.tile{border:1px solid var(--line);border-radius:24px;padding:24px;background:var(--panel);position:relative;overflow:hidden}
+.tile::before{content:"";position:absolute;inset:0;background:radial-gradient(80% 80% at 100% 0,var(--g,rgba(255,176,32,.16)),transparent 70%);pointer-events:none}
+.tile>*{position:relative}
+.tile h3{font:800 22px var(--d)}
+.tile .n{position:absolute;right:20px;top:14px;font:800 44px var(--d);color:rgba(244,238,223,.13)}
+.tile p{margin-top:6px;color:#CFC9BB;font-size:15px;max-width:34ch}
+.chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:16px}
+.chips code{background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:8px;padding:3px 9px;font-size:13px;color:var(--amber)}
+.t1{grid-column:span 2;grid-row:span 2;--g:rgba(255,107,74,.24)}.t1 h3{font-size:30px}.t2{grid-column:span 2;--g:rgba(55,214,166,.16)}.t3{--g:rgba(139,123,255,.2)}
+@media(max-width:900px){.bento{grid-template-columns:1fr 1fr}.t1{grid-column:span 2;grid-row:auto}}
+@media(max-width:560px){.bento{grid-template-columns:1fr}.t1,.t2{grid-column:auto}}
+.setg{margin-top:34px;display:grid;grid-template-columns:1fr 1fr;gap:34px;align-items:start}
+@media(max-width:900px){.setg{grid-template-columns:1fr}}
+.term{background:#080D1C;border:1px solid var(--line);border-radius:22px;padding:16px;display:flex;flex-direction:column;gap:9px}
+.keys{list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:0 22px}
+.keys li{padding:11px 0;border-bottom:1px solid var(--line);font-size:14px;color:var(--muted)}
+.keys code{display:block;color:var(--amber);font-size:13px;margin-bottom:1px}
+@media(max-width:560px){.keys{grid-template-columns:1fr}}
+.note{margin-top:14px;color:var(--muted);font-size:14px}
+.steps{margin-top:34px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px;list-style:none;counter-reset:s}
+.steps li{counter-increment:s;background:var(--panel);border:1px solid var(--line);border-radius:22px;padding:24px}
+.steps li::before{content:counter(s);display:grid;place-items:center;width:38px;height:38px;border-radius:50%;background:var(--paper);color:var(--ink);font:800 16px var(--d);margin-bottom:14px}
+.steps b{display:block;font:800 20px var(--d);margin-bottom:5px}.steps span{color:var(--muted);font-size:15px}
+@media(max-width:760px){.steps{grid-template-columns:1fr}}
+.foot{border-top:1px solid var(--line);padding:30px 0 44px;color:var(--muted);font-size:14px}
+.foot .w{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}.foot a{color:var(--paper)}
+.pg{padding:44px 0 72px}
+.pg h1{font-size:clamp(32px,5vw,54px);max-width:none}
+.split{margin-top:32px;display:grid;grid-template-columns:1.05fr .95fr;gap:30px;align-items:start}
+@media(max-width:900px){.split{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:24px;padding:28px}
+.card h2{font-size:22px}
+.fld{margin-top:20px}.fld label{display:block;font-weight:700;font-size:14px;margin-bottom:8px}
+.inp{width:100%;min-height:54px;background:var(--ink);border:2px solid var(--line);border-radius:14px;padding:0 16px;font-size:18px}
+.inp:focus{outline:none;border-color:var(--amber)}
 .hint{font-size:13px;color:var(--muted);margin-top:7px}
-.input{width:100%;min-height:52px;background:var(--ink);border:2px solid var(--line);border-radius:var(--r-md);padding:0 16px;font-size:17px;color:var(--paper)}
-.input::placeholder{color:#5F6A86}
-.input:focus{outline:none;border-color:var(--amber)}
-.check{display:flex;gap:12px;align-items:flex-start;margin-top:20px;font-size:14px;color:#CFC9BB;cursor:pointer}
-.check input{width:20px;height:20px;margin-top:2px;accent-color:var(--amber);flex:none}
-.card .btn{width:100%;margin-top:22px}
-.err{margin-top:14px;padding:12px 14px;border-radius:var(--r-md);background:rgba(240,82,79,.12);border:1px solid rgba(240,82,79,.5);color:#FFC9C7;font-size:14px}
-
-.howto{list-style:none;counter-reset:h}
-.howto li{counter-increment:h;display:flex;gap:14px;padding:16px 0;border-bottom:1px solid var(--line)}
-.howto li:last-child{border-bottom:0}
-.howto li::before{content:counter(h);flex:none;width:30px;height:30px;border-radius:50%;background:var(--paper);color:var(--ink);display:grid;place-items:center;font-weight:800;font-family:var(--display);font-size:14px}
-.howto b{color:var(--paper)}
-.howto span{color:#CFC9BB;font-size:15px}
-
-/* the ticket: pair code */
-.ticket{margin-top:26px;display:none;position:relative;background:var(--paper);color:var(--ink);border-radius:18px;
-  -webkit-mask:radial-gradient(circle 13px at 0 59px,transparent 98%,#000) left/51% 100% no-repeat,radial-gradient(circle 13px at 100% 59px,transparent 98%,#000) right/51% 100% no-repeat;
-          mask:radial-gradient(circle 13px at 0 59px,transparent 98%,#000) left/51% 100% no-repeat,radial-gradient(circle 13px at 100% 59px,transparent 98%,#000) right/51% 100% no-repeat}
-.ticket.show{display:block;animation:pop .3s ease-out both}
-.ticket-top{height:56px;padding:0 24px;align-items:center!important;display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-family:var(--display);font-weight:800;font-size:15px}
-.ticket-top small{font-family:var(--body);font-weight:500;font-size:13px;color:#4A5169}
+.chk{display:flex;gap:12px;align-items:flex-start;margin-top:18px;font-size:14px;color:#CFC9BB;cursor:pointer}.chk input{width:20px;height:20px;accent-color:var(--amber);flex:none;margin-top:2px}
+.card .btn{width:100%;margin-top:20px}
+.err{margin-top:14px;padding:12px 14px;border-radius:14px;background:rgba(255,107,74,.12);border:1px solid rgba(255,107,74,.5);color:#FFD0C7;font-size:14px}
+.tk{display:none;margin-top:24px;background:var(--paper);color:var(--ink);border-radius:18px;-webkit-mask:radial-gradient(circle 13px at 0 59px,#0000 98%,#000) left/51% 100% no-repeat,radial-gradient(circle 13px at 100% 59px,#0000 98%,#000) right/51% 100% no-repeat;mask:radial-gradient(circle 13px at 0 59px,#0000 98%,#000) left/51% 100% no-repeat,radial-gradient(circle 13px at 100% 59px,#0000 98%,#000) right/51% 100% no-repeat}
+.tk.on{display:block;animation:pop .3s both}
+.tt{height:56px;padding:0 24px;display:flex;align-items:center;justify-content:space-between;font:800 15px var(--d)}.tt small{font:500 13px var(--b);color:#4A5169}
 .perf{border-top:3px dotted #B9B19C;margin:1px 18px 0}
-.ticket-code{padding:22px 24px 8px;text-align:center;font-family:var(--display);font-weight:800;font-size:clamp(28px,8.4vw,50px);letter-spacing:.06em;line-height:1.1;white-space:nowrap}
-.ticket-code.loading{font-size:20px;letter-spacing:0;color:#4A5169;font-weight:600;white-space:normal}
-.ticket-msg{padding:0 24px 8px;text-align:center;font-size:14px;color:#4A5169}
-.ticket .actions{padding:8px 24px 22px}
-.ticket .btn{margin-top:10px;background:var(--ink);color:var(--paper)}
-.ticket .btn:hover{background:#1C2743}
-.after{margin-top:16px;font-size:14px;color:var(--muted)}
-.after a,.after button{color:var(--amber);font-weight:700;background:none;border:0;cursor:pointer;text-decoration:underline;font-size:inherit}
-
-/* ---------- settings ---------- */
-.login{max-width:520px}
-.who{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:30px}
-.chip{display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border-radius:999px;background:var(--panel);border:1px solid var(--line);font-size:14px;font-weight:500}
-.chip.warn{border-color:rgba(255,176,32,.6);color:var(--amber)}
-.linkbtn{margin-left:auto;background:none;border:0;color:var(--muted);text-decoration:underline;cursor:pointer;font-size:14px;min-height:40px}
-.linkbtn:hover{color:var(--paper)}
-fieldset{border:1px solid var(--line);border-radius:var(--r-lg);padding:8px 26px 26px;margin-top:22px;background:var(--panel);min-width:0}
-legend{font-family:var(--display);font-weight:700;font-size:20px;padding:0 10px;margin-left:-10px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 26px}
-@media (max-width:760px){.grid2{grid-template-columns:1fr}fieldset{padding:6px 18px 22px}}
-.seg{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;background:var(--ink);border:2px solid var(--line);border-radius:var(--r-md);padding:4px}
-.seg button{background:none;border:0;border-radius:10px;min-height:44px;padding:4px 6px;font-weight:700;font-size:13px;color:var(--muted);cursor:pointer}
-.seg button[aria-pressed="true"]{background:var(--paper);color:var(--ink)}
-@media (max-width:520px){.seg{grid-template-columns:1fr 1fr}}
-.toggle{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:15px 0;border-bottom:1px solid var(--line)}
-.toggle:last-child{border-bottom:0;padding-bottom:0}
-.toggle .t b{display:block;font-size:15px}
-.toggle .t span{font-size:13px;color:var(--muted)}
-.switch{position:relative;flex:none;width:54px;height:32px;border-radius:999px;background:var(--line);border:0;cursor:pointer;transition:background .15s}
-.switch::after{content:"";position:absolute;top:4px;left:4px;width:24px;height:24px;border-radius:50%;background:var(--paper);transition:transform .15s}
-.switch[aria-checked="true"]{background:var(--amber)}
-.switch[aria-checked="true"]::after{transform:translateX(22px);background:var(--amber-deep)}
-.switch[disabled]{opacity:.45;cursor:not-allowed}
-.preview{margin-top:10px;width:100%;max-height:170px;object-fit:cover;border-radius:var(--r-md);border:1px solid var(--line);display:none}
-.locked{margin-top:12px;padding:12px 14px;border-radius:var(--r-md);background:rgba(255,176,32,.1);border:1px solid rgba(255,176,32,.5);font-size:14px;color:#FFE2A8}
-.locked a{color:var(--amber);font-weight:700}
-
-.savebar{position:sticky;bottom:0;z-index:20;margin-top:26px;background:rgba(14,20,36,.96);border:1px solid var(--line);border-radius:var(--r-lg);padding:12px 12px 12px 22px;display:flex;align-items:center;gap:14px}
-.savebar .state{font-size:14px;color:var(--muted);flex:1}
-.savebar .state.dirty{color:var(--amber);font-weight:700}
-.savebar .btn{min-height:48px;padding:0 30px}
-
-/* toast */
-.toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);background:var(--paper);color:var(--ink);padding:12px 20px;border-radius:12px;font-weight:700;font-size:15px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:60;max-width:calc(100% - 32px);text-align:center}
-.toast.show{opacity:1;transform:translate(-50%,0)}
-.toast.bad{background:var(--red);color:#fff}
-
-@media (prefers-reduced-motion:reduce){
-  *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
-}
+.code{padding:22px 12px 8px;text-align:center;font:800 clamp(28px,8.4vw,50px)/1.1 var(--d);letter-spacing:.06em;white-space:nowrap}.code.ld{font-size:20px;letter-spacing:0;color:#4A5169;white-space:normal}
+.tm{padding:0 24px 8px;text-align:center;font-size:14px;color:#4A5169}
+.tk .btn{margin:8px 24px 22px;width:calc(100% - 48px);background:var(--ink);color:var(--paper)}
+.how{list-style:none;counter-reset:h}.how li{counter-increment:h;display:flex;gap:14px;padding:15px 0;border-bottom:1px solid var(--line);color:#CFC9BB;font-size:15px}.how li:last-child{border:0}
+.how li::before{content:counter(h);flex:none;width:30px;height:30px;border-radius:50%;background:var(--paper);color:var(--ink);display:grid;place-items:center;font:800 14px var(--d)}
+.aft{margin-top:16px;font-size:14px;color:var(--muted)}.aft b{color:var(--amber)}
+.toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:var(--paper);color:var(--ink);padding:12px 20px;border-radius:12px;font-weight:700;opacity:0;pointer-events:none;transition:.2s;z-index:50}.toast.on{opacity:1;transform:translate(-50%,0)}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 </style>
 </head>
 <body>
+<header class="bar"><div class="w">
+  <button class="brand" data-go="home" aria-label="SHAGGY XMD home"><span class="mark"><img src="https://cdn.phototourl.com/free/2026-09-11-9979a852-3ada-4c09-ac79-18e472788e6c.png" alt="" onerror="this.outerHTML='<svg width=20 height=20 viewBox=&quot;0 0 64 64&quot;><path d=&quot;M36 6 14 38h15l-4 20 25-33H34z&quot; fill=&quot;#2A1B00&quot;/></svg>'"></span>SHAGGY XMD</button>
+  <nav class="tabs" aria-label="Main"><button class="tab" data-go="home">Home</button><button class="tab" data-go="pair">Pair Web</button></nav>
+  <div class="live" role="status"><span class="dot" id="dot"></span><span id="live">Checking status</span></div>
+</div></header>
 
-<header class="bar">
-  <div class="bar-in">
-    <button class="brand" data-go="home" aria-label="SHAGGY XMD home">
-      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 64 64"><path d="M36 6 14 38h15l-4 20 25-33H34z" fill="#2A1B00"/></svg></span>
-      SHAGGY XMD
-    </button>
-    <nav class="tabs" aria-label="Main">
-      <button class="tab" data-go="home">Home</button>
-      <button class="tab" data-go="pair">Pair<span class="w"> Web</span></button>
-      <button class="tab" data-go="settings">Settings<span class="w"> Web</span></button>
-    </nav>
-    <div class="live" id="live" role="status"><span class="dot" id="liveDot"></span><span id="liveTxt">Checking status</span></div>
-  </div>
-</header>
+<main class="view" id="v-home">
+  <section class="hero"><div class="w hg">
+    <div>
+      <h1>Movies, songs and downloads, right inside WhatsApp.</h1>
+      <p class="si">චිත්‍රපට, සිංහල උපසිරැසි, සින්දු. සියල්ල WhatsApp එකෙන්ම.</p>
+      <p class="lead">SHAGGY XMD is a WhatsApp bot with 67 commands for movies, series, anime, music and file downloads. Pair your number and it is ready in about a minute.</p>
+      <div class="row"><button class="btn pri" data-go="pair">Pair Web</button><a class="btn gho" href="#cmds" data-scroll="cmds">See the commands</a></div>
+      <div class="stats"><div><b data-n="67">0</b><span>commands</span></div><div><b data-n="6">0</b><span>categories</span></div><div><b>v4</b><span>latest release</span></div></div>
+    </div>
+    <div class="frame"><div class="phone" aria-label="Example chat">
+      <div class="ph"><div class="av">SX</div><div><b>SHAGGY XMD</b><span>online</span></div></div>
+      <div class="chat" id="chat"></div>
+    </div></div>
+  </div></section>
 
-<!-- ================= HOME ================= -->
-<main class="view" id="view-home">
-  <section class="hero">
-    <div class="wrap hero-grid">
+  <section class="sec" id="cmds" style="padding-top:8px"><div class="w">
+    <h2>Everything is in the menu</h2>
+    <p class="sub">Send <b>.menu</b> to your bot, pick a category, pick a command.</p>
+    <div class="bento">
+      <div class="tile t1"><span class="n">25</span><h3>Movies and TV</h3><p>Search, choose a quality and get the file in your chat. Sinhala subtitles included where the source has them.</p><div class="chips"><code>.movie</code><code>.cineverse</code><code>.cinesubz</code><code>.moviesublk</code><code>.cinetv</code><code>.cinesend</code><code>.tvsend</code></div></div>
+      <div class="tile t2"><span class="n">12</span><h3>Downloaders</h3><p>Songs, YouTube, TikTok, MediaFire and Google Drive.</p><div class="chips"><code>.song</code><code>.csong</code><code>.tiktok</code><code>.mediafire</code></div></div>
+      <div class="tile t3"><span class="n">4</span><h3>Anime</h3><p>Find an episode and get it as a file.</p></div>
+      <div class="tile t3"><span class="n">11</span><h3>Tools and fun</h3><p>Everyday helpers for any chat.</p></div>
+      <div class="tile t2" style="--g:rgba(255,176,32,.16)"><span class="n">10</span><h3>General and group</h3><p>Alive check, group info, tagging, view-once restore with <b>.vv</b>.</p></div>
+      <div class="tile t2" style="--g:rgba(255,107,74,.16)"><span class="n">5</span><h3>Admin</h3><p>Owner controls, settings and deleted message recovery.</p></div>
+    </div>
+  </div></section>
+
+  <section class="sec" style="padding-top:8px"><div class="w">
+    <h2>Change anything with .set</h2>
+    <p class="sub">Settings live in WhatsApp now. Send <b>.set</b> alone to see your current values, or change one or many at once.</p>
+    <div class="setg">
+      <div class="term" aria-label="Example .set chat">
+        <div class="m me">.set BOT_NAME:My Movie Bot</div>
+        <div class="m bot">✅ UPDATE SUCCESS
+🎀 BOT_NAME ──❯ My Movie Bot</div>
+        <div class="m me">.set ANTI_DELETE:on, PREFIX:!</div>
+        <div class="m bot">✅ UPDATE SUCCESS
+🎀 ANTI_DELETE ──❯ true
+🎀 PREFIX ──❯ !</div>
+      </div>
       <div>
-        <h1>Movies, songs and downloads, right inside WhatsApp.</h1>
-        <p class="si">චිත්‍රපට, සිංහල උපසිරැසි, සින්දු, සියල්ල WhatsApp එකෙන්ම.</p>
-        <p class="lead">SHAGGY XMD is a WhatsApp bot with 65 commands for movies, TV series, anime, music and file downloads. Pair your number and it is ready in about a minute.</p>
-        <div class="cta-row">
-          <button class="btn btn-primary" data-go="pair">Pair Web</button>
-          <button class="btn btn-ghost" data-go="settings">Settings Web</button>
-        </div>
-        <p class="fine">Version 4. If you can, pair a secondary WhatsApp number.</p>
-      </div>
-
-      <div class="phone" aria-label="Example chat with the bot">
-        <div class="phone-head">
-          <div class="avatar" aria-hidden="true">SX</div>
-          <div><b>SHAGGY XMD</b><span>online</span></div>
-        </div>
-        <div class="chat" id="chat" aria-live="off"></div>
+        <ul class="keys">
+          <li><code>BOT_NAME</code>Name shown in menus</li>
+          <li><code>PREFIX</code>1 to 3 characters</li>
+          <li><code>MODE</code>public, private, inbox, groups</li>
+          <li><code>BOT_IMAGE</code>Image link for replies</li>
+          <li><code>ANTI_DELETE</code>Recover deleted messages</li>
+          <li><code>BUTTON_MODE</code>Tap buttons, not numbers</li>
+          <li><code>ALWAYS_ONLINE</code>Stay online</li>
+          <li><code>AUTO_TYPING</code>Show typing</li>
+          <li><code>STATUS_VIEW</code>View statuses</li>
+          <li><code>AUTO_LIKE</code>Like statuses</li>
+        </ul>
+        <p class="note">Use on / off (or true / false) for switches. Changes apply to your running bot right away, and the bot re-checks its saved settings every 5 minutes.</p>
       </div>
     </div>
-  </section>
+  </div></section>
 
-  <div class="band" aria-hidden="true"></div>
-
-  <section class="section">
-    <div class="wrap">
-      <h2>What is on the programme</h2>
-      <p class="sub">Every command lives in the menu. Send <b>.menu</b> to your bot and pick a category.</p>
-      <div class="board">
-        <div class="cell"><div class="row"><span class="name">Movies and TV</span><span class="lead-dots"></span><span class="count">23</span></div><p class="desc">CineSubz, MovieSubLK, CineVerse and more. Search, pick, download.</p></div>
-        <div class="cell"><div class="row"><span class="name">Downloaders</span><span class="lead-dots"></span><span class="count">12</span></div><p class="desc">Songs, YouTube, TikTok, MediaFire and Google Drive files.</p></div>
-        <div class="cell"><div class="row"><span class="name">Anime and cartoons</span><span class="lead-dots"></span><span class="count">4</span></div><p class="desc">Find an episode and get it as a file.</p></div>
-        <div class="cell"><div class="row"><span class="name">Tools and fun</span><span class="lead-dots"></span><span class="count">11</span></div><p class="desc">Everyday helpers you can run from any chat.</p></div>
-        <div class="cell"><div class="row"><span class="name">General and group</span><span class="lead-dots"></span><span class="count">10</span></div><p class="desc">Status, alive check, group info and tagging.</p></div>
-        <div class="cell"><div class="row"><span class="name">Admin</span><span class="lead-dots"></span><span class="count">5</span></div><p class="desc">Owner controls, settings and access keys.</p></div>
-      </div>
-    </div>
-  </section>
-
-  <section class="section" style="padding-top:0">
-    <div class="wrap">
-      <h2>Built in, no extra setup</h2>
-      <div class="extras">
-        <div class="extra"><h3>Button mode</h3><p>Tap a button instead of typing a number. Turn it on with <code>.button on</code> or in Settings Web.</p></div>
-        <div class="extra"><h3>Deleted message recovery</h3><p>When someone deletes a message you get a note showing who deleted it, who sent it, and the message itself.</p></div>
-        <div class="extra"><h3>View once, restored</h3><p>Reply to a view-once photo, video or voice note with <code>.vv</code> and the bot sends it back.</p></div>
-        <div class="extra"><h3>Songs to your channel</h3><p><code>.csong channel link, song name</code> posts the song with a neat description and the MP3 to your WhatsApp channel.</p></div>
-      </div>
-    </div>
-  </section>
-
-  <div class="band" aria-hidden="true"></div>
-
-  <section class="section">
-    <div class="wrap">
-      <h2>Ready in three steps</h2>
-      <ol class="steps">
-        <li><b>Get a pair code</b><span>Open Pair Web, enter your WhatsApp number with country code.</span></li>
-        <li><b>Link it in WhatsApp</b><span>Linked devices, Link with phone number, then type the code.</span></li>
-        <li><b>Send .menu</b><span>Your bot replies with its menu. Pick a category and go.</span></li>
-      </ol>
-      <div class="cta-row"><button class="btn btn-primary" data-go="pair">Open Pair Web</button></div>
-    </div>
-  </section>
+  <section class="sec" style="padding-top:8px"><div class="w">
+    <h2>Ready in three steps</h2>
+    <ol class="steps"><li><b>Get a pair code</b><span>Open Pair Web and enter your number with country code.</span></li><li><b>Link it in WhatsApp</b><span>Linked devices, Link with phone number, type the code.</span></li><li><b>Send .menu</b><span>Your bot replies with its menu. Pick a category and go.</span></li></ol>
+    <div class="row"><button class="btn pri" data-go="pair">Open Pair Web</button></div>
+  </div></section>
 </main>
 
-<!-- ================= PAIR ================= -->
-<main class="view" id="view-pair">
-  <div class="wrap page">
-    <h1>Pair Web</h1>
-    <p class="sub">Link your WhatsApp number to SHAGGY XMD. You get an 8 character code to type into WhatsApp.</p>
-
-    <div class="split">
-      <section class="card" aria-labelledby="pairTitle">
-        <h2 id="pairTitle">Your WhatsApp number</h2>
-        <div class="field">
-          <label for="phone">Number with country code</label>
-          <input class="input" id="phone" type="tel" inputmode="numeric" autocomplete="tel" maxlength="15" placeholder="94768069800">
-          <p class="hint">Digits only. No plus sign, no spaces.</p>
-        </div>
-        <label class="check"><input type="checkbox" id="terms" checked><span>I understand this links a WhatsApp account to the bot. I will use a secondary number if I can.</span></label>
-        <button class="btn btn-primary" id="pairBtn">Get pair code</button>
-        <div class="err" id="pairErr" role="alert" hidden></div>
-
-        <div class="ticket" id="ticket" aria-live="polite">
-          <div class="ticket-top"><span>ADMIT ONE</span><small>SHAGGY XMD v4</small></div>
-          <div class="perf"></div>
-          <div class="ticket-code" id="code">........</div>
-          <p class="ticket-msg" id="codeMsg"></p>
-          <div class="actions"><button class="btn" id="copyBtn">Copy code</button></div>
-        </div>
-        <p class="after" id="afterPair" hidden>Linked? Send <b>.getkey</b> to your bot, then open <button data-go="settings">Settings Web</button> to change its name, prefix and automation.</p>
-      </section>
-
-      <section class="card" aria-labelledby="howTitle">
-        <h2 id="howTitle">Enter the code in WhatsApp</h2>
-        <ol class="howto">
-          <li><span><b>Open WhatsApp</b> on the phone that has this number.</span></li>
-          <li><span>Go to <b>Settings</b>, then <b>Linked devices</b>.</span></li>
-          <li><span>Tap <b>Link a device</b>, then <b>Link with phone number instead</b>.</span></li>
-          <li><span>Type the 8 character code from the ticket. It expires quickly, so have WhatsApp open first.</span></li>
-          <li><span>Wait for the welcome message, then send <b>.menu</b>.</span></li>
-        </ol>
-      </section>
-    </div>
-  </div>
-</main>
-
-<!-- ================= SETTINGS ================= -->
-<main class="view" id="view-settings">
-  <div class="wrap page">
-    <h1>Settings Web</h1>
-    <p class="sub">Change how your bot looks and behaves. Changes apply to your running bot within seconds.</p>
-
-    <section class="card login" id="loginCard" style="margin-top:34px" aria-labelledby="loginTitle">
-      <h2 id="loginTitle">Sign in</h2>
-      <div class="field">
-        <label for="sNumber">Bot number</label>
-        <input class="input" id="sNumber" type="tel" inputmode="numeric" maxlength="15" placeholder="94768069800" autocomplete="tel">
-      </div>
-      <div class="field">
-        <label for="sKey">Access key</label>
-        <input class="input" id="sKey" type="password" autocomplete="off" placeholder="A1B2C3D4E5" spellcheck="false">
-        <p class="hint">Send <b>.getkey</b> to your bot on WhatsApp to get it. Only the owner can request it.</p>
-      </div>
-      <button class="btn btn-primary" id="loginBtn">Sign in</button>
-      <div class="err" id="loginErr" role="alert" hidden></div>
+<main class="view" id="v-pair"><div class="w pg">
+  <h1>Pair Web</h1>
+  <p class="sub">Link your WhatsApp number to SHAGGY XMD. You get an 8 character code to type into WhatsApp.</p>
+  <div class="split">
+    <section class="card">
+      <h2>Your WhatsApp number</h2>
+      <div class="fld"><label for="phone">Number with country code</label><input class="inp" id="phone" type="tel" inputmode="numeric" maxlength="15" autocomplete="tel" placeholder="94768069800"><p class="hint">Digits only. No plus sign, no spaces.</p></div>
+      <label class="chk"><input type="checkbox" id="terms" checked><span>I understand this links a WhatsApp account to the bot. I will use a secondary number if I can.</span></label>
+      <button class="btn pri" id="go">Get pair code</button>
+      <div class="err" id="err" role="alert" hidden></div>
+      <div class="tk" id="tk" aria-live="polite"><div class="tt"><span>ADMIT ONE</span><small>SHAGGY XMD v4</small></div><div class="perf"></div><div class="code" id="code"></div><p class="tm" id="tm"></p><button class="btn" id="copy">Copy code</button></div>
+      <p class="aft" id="aft" hidden>Linked? Send <b>.set</b> to your bot to see and change its settings. Commands need an active subscription: <a href="https://wa.me/94784224161" target="_blank" rel="noopener" style="color:var(--amber)">message the owner</a>.</p>
     </section>
-
-    <div id="panel" hidden>
-      <div class="who">
-        <span class="chip" id="chipNum"></span>
-        <span class="chip" id="chipOnline"></span>
-        <span class="chip" id="chipLic"></span>
-        <button class="linkbtn" id="logoutBtn">Sign out</button>
-      </div>
-
-      <fieldset>
-        <legend>Identity</legend>
-        <div class="grid2">
-          <div class="field"><label for="f_BOT_NAME">Bot name</label><input class="input" id="f_BOT_NAME" maxlength="60"></div>
-          <div class="field"><label for="f_BOT_FOOTER">Footer text</label><input class="input" id="f_BOT_FOOTER" maxlength="120"></div>
-          <div class="field"><label for="f_MOVIE_FOOTER">Movie footer</label><input class="input" id="f_MOVIE_FOOTER" maxlength="120"></div>
-          <div class="field"><label for="f_MOVIE_CAPTION">Movie caption</label><input class="input" id="f_MOVIE_CAPTION" maxlength="200"></div>
-        </div>
-        <div class="field">
-          <label for="f_BOT_IMAGE">Bot image link</label>
-          <input class="input" id="f_BOT_IMAGE" type="url" inputmode="url" placeholder="https://example.com/image.jpg">
-          <p class="hint">Leave the default to use the built-in images.</p>
-          <img class="preview" id="imgPrev" alt="Bot image preview">
-        </div>
-      </fieldset>
-
-      <fieldset>
-        <legend>Behaviour</legend>
-        <div class="grid2">
-          <div class="field"><label for="f_PREFIX">Command prefix</label><input class="input" id="f_PREFIX" maxlength="3" style="max-width:140px"><p class="hint">Up to 3 characters. Default is a dot.</p></div>
-          <div class="field"><span class="label" id="modeLbl">Who can use the bot</span>
-            <div class="seg" role="group" aria-labelledby="modeLbl" id="modeSeg">
-              <button type="button" data-mode="public" aria-pressed="false">Everyone</button>
-              <button type="button" data-mode="private" aria-pressed="false">Only me</button>
-              <button type="button" data-mode="inbox" aria-pressed="false">Private chats</button>
-              <button type="button" data-mode="groups" aria-pressed="false">Groups</button>
-            </div>
-            <p class="hint">You, as the owner, can always use it.</p>
-          </div>
-        </div>
-      </fieldset>
-
-      <fieldset>
-        <legend>Automation</legend>
-        <div id="toggles"></div>
-      </fieldset>
-
-      <fieldset>
-        <legend>Button mode</legend>
-        <div id="btnToggle"></div>
-        <div class="locked" id="btnLocked" hidden>Button mode is a paid feature. Message the owner to get a subscription: <a href="https://wa.me/94784224161" target="_blank" rel="noopener">wa.me/94784224161</a></div>
-      </fieldset>
-
-      <div class="savebar">
-        <span class="state" id="saveState">No changes</span>
-        <button class="btn btn-primary" id="saveBtn" disabled>Save changes</button>
-      </div>
-    </div>
+    <section class="card"><h2>Enter the code in WhatsApp</h2>
+      <ol class="how" style="margin-top:8px"><li>Open WhatsApp on the phone that has this number.</li><li>Go to Settings, then Linked devices.</li><li>Tap Link a device, then Link with phone number instead.</li><li>Type the 8 character code. It expires quickly, so open WhatsApp first.</li><li>Wait for the welcome message, then send .menu.</li></ol>
+    </section>
   </div>
-</main>
+</div></main>
 
-<footer class="foot">
-  <div class="wrap foot-in">
-    <span>SHAGGY XMD v4. Powered by Shaggy Tech.</span>
-    <span>Need access? <a href="https://wa.me/94784224161" target="_blank" rel="noopener">Message the owner</a></span>
-  </div>
-</footer>
-
-<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<footer class="foot"><div class="w"><span>SHAGGY XMD v4. Powered by Shaggy Tech.</span><span>Need a subscription? <a href="https://wa.me/94784224161" target="_blank" rel="noopener">Message the owner</a></span></div></footer>
+<div class="toast" id="toast" role="status"></div>
 
 <script>
 (function(){
-  'use strict';
-  var $ = function(id){ return document.getElementById(id); };
-  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+var $=function(i){return document.getElementById(i)},V=['home','pair'],rm=matchMedia('(prefers-reduced-motion: reduce)').matches,played=false,tt;
+function toast(m){var t=$('toast');t.textContent=m;t.className='toast on';clearTimeout(tt);tt=setTimeout(function(){t.className='toast'},2400)}
+function cur(){var h=location.hash.replace('#/','');return V.indexOf(h)>-1?h:(location.pathname.replace(/\/+$/,'')==='/pair'?'pair':'home')}
+function render(){var v=cur();V.forEach(function(n){$('v-'+n).classList.toggle('on',n===v)});
+ document.querySelectorAll('.tab').forEach(function(b){b.dataset.go===v?b.setAttribute('aria-current','page'):b.removeAttribute('aria-current')});
+ window.scrollTo(0,0);if(v==='home'){chat();count()}document.title=(v==='pair'?'Pair Web':'WhatsApp movie bot')+' | SHAGGY XMD'}
+document.addEventListener('click',function(e){var s=e.target.closest('[data-scroll]');if(s){e.preventDefault();var t=$(s.dataset.scroll);t&&t.scrollIntoView({behavior:rm?'auto':'smooth'});return}
+ var g=e.target.closest('[data-go]');if(!g)return;e.preventDefault();var v=g.dataset.go;location.hash==='#/'+v?render():location.hash='#/'+v});
+addEventListener('hashchange',render);
 
-  /* ---------- toast ---------- */
-  var toastTimer;
-  function toast(msg, bad){
-    var t = $('toast'); t.textContent = msg; t.className = 'toast show' + (bad ? ' bad' : '');
-    clearTimeout(toastTimer); toastTimer = setTimeout(function(){ t.className = 'toast'; }, 2800);
-  }
+/* status: one fetch on load, then once every 5 minutes (single timer, paused while the tab is hidden) */
+var last=0;
+function status(){last=Date.now();fetch('/code/status',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){$('dot').className='dot on';$('live').textContent='Online, '+d.bots+(d.bots===1?' bot':' bots')+' running'}).catch(function(){$('dot').className='dot off';$('live').textContent='Server unreachable'})}
+status();setInterval(function(){if(!document.hidden)status()},300000);
+document.addEventListener('visibilitychange',function(){if(!document.hidden&&Date.now()-last>300000)status()});
 
-  /* ---------- router ---------- */
-  var VIEWS = ['home','pair','settings'];
-  function current(){
-    var h = (location.hash || '').replace('#/','').replace('#','');
-    if (VIEWS.indexOf(h) > -1) return h;
-    return location.pathname.replace(/\/+$/,'') === '/pair' ? 'pair' : 'home';
-  }
-  function render(){
-    var v = current();
-    VIEWS.forEach(function(n){ $('view-'+n).classList.toggle('active', n === v); });
-    document.querySelectorAll('.tab').forEach(function(b){
-      if (b.dataset.go === v) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current');
-    });
-    window.scrollTo(0,0);
-    if (v === 'home') playChat();
-    document.title = (v === 'pair' ? 'Pair Web' : v === 'settings' ? 'Settings Web' : 'WhatsApp movie bot') + ' | SHAGGY XMD';
-  }
-  document.addEventListener('click', function(e){
-    var el = e.target.closest('[data-go]');
-    if (!el) return;
-    e.preventDefault();
-    var v = el.dataset.go;
-    if (location.hash === '#/'+v) render(); else location.hash = '#/'+v;
-  });
-  window.addEventListener('hashchange', render);
+/* counters: run once */
+var counted=false;
+function count(){if(counted)return;counted=true;document.querySelectorAll('[data-n]').forEach(function(el){var n=+el.dataset.n;if(rm){el.textContent=n;return}var s=performance.now();(function f(t){var p=Math.min((t-s)/900,1);el.textContent=Math.round(n*(1-Math.pow(1-p,3)));if(p<1)requestAnimationFrame(f)})(s)})}
 
-  /* ---------- live status ---------- */
-  function loadStatus(){
-    fetch('/code/status', {cache:'no-store'}).then(function(r){ return r.json(); }).then(function(d){
-      $('liveDot').className = 'dot on';
-      $('liveTxt').textContent = 'Online, ' + d.bots + (d.bots === 1 ? ' bot' : ' bots') + ' running';
-    }).catch(function(){
-      $('liveDot').className = 'dot off';
-      $('liveTxt').textContent = 'Server unreachable';
-    });
-  }
-  loadStatus(); setInterval(loadStatus, 60000);
+/* chat demo: plays once */
+function add(c,t,x){var m=document.createElement('div');m.className='m '+c;m.textContent=t;if(x)m.appendChild(x);$('chat').appendChild(m)}
+function chat(){if(played)return;played=true;
+ var pk=document.createElement('span');pk.className='pick';pk.textContent='📋 Select';
+ var f=document.createElement('div');f.className='fl';f.innerHTML='<span style="font-size:22px">🎞️</span><div>Vikings S01E01 720p.mp4<small>412 MB</small></div>';
+ var S=[function(){add('me','.movie vikings')},function(){add('bot','🔍 Searching for vikings...')},function(){add('bot','🎬 Results\n1. Vikings (2013)\n2. Vikings: Valhalla (2022)\n3. Vikings: Wolf Wars (2015)',pk)},function(){add('me','1. Vikings (2013)')},function(){add('bot','⏳ Downloading, about 2 minutes.')},function(){add('bot','✅ Sent to your chat',f)}];
+ if(rm){S.forEach(function(s){s()});return}var t=300;S.forEach(function(s,i){setTimeout(s,t);t+=(i===1||i===4)?1500:1100})}
 
-  /* ---------- chat demo (plays once per visit to Home) ---------- */
-  var chatDone = false, chatTimers = [];
-  function addMsg(cls, text, extra){
-    var m = document.createElement('div'); m.className = 'msg ' + cls; m.textContent = text;
-    if (extra) m.appendChild(extra);
-    $('chat').appendChild(m); return m;
-  }
-  function pickEl(t){ var s = document.createElement('span'); s.className = 'pick'; s.textContent = t; return s; }
-  function fileEl(){
-    var f = document.createElement('div'); f.className = 'file';
-    var i = document.createElement('i'); i.textContent = '🎞️';
-    var d = document.createElement('div'); d.textContent = 'Vikings S01E01 720p.mp4';
-    var sm = document.createElement('small'); sm.textContent = '412 MB';
-    d.appendChild(sm); f.appendChild(i); f.appendChild(d); return f;
-  }
-  function playChat(){
-    if (chatDone) return;
-    chatDone = true;
-    var steps = [
-      function(){ addMsg('me', '.movie vikings'); },
-      function(){ addMsg('bot', '🔍 Searching for vikings...'); },
-      function(){ addMsg('bot', '🎬 Results\n1. Vikings (2013) · series\n2. Vikings: Valhalla (2022)\n3. Vikings: Wolf Wars (2015)', pickEl('📋 Select')); },
-      function(){ addMsg('me', '1. Vikings (2013)'); },
-      function(){ addMsg('bot', '⏳ Downloading, this takes about 2 minutes.'); },
-      function(){ addMsg('bot', '✅ Sent to your chat', fileEl()); }
-    ];
-    if (reduce){ steps.forEach(function(s){ s(); }); return; }
-    var t = 300;
-    steps.forEach(function(s, i){
-      chatTimers.push(setTimeout(s, t));
-      t += (i === 1 || i === 4) ? 1500 : 1100;
-    });
-  }
-
-  /* ---------- pair ---------- */
-  var phone = $('phone');
-  phone.addEventListener('input', function(){ phone.value = phone.value.replace(/\D/g,''); });
-  function showPairErr(msg){ var e = $('pairErr'); e.textContent = msg; e.hidden = !msg; }
-  function fmtCode(c){ return /^[A-Za-z0-9]{8}$/.test(c) ? c.slice(0,4) + '-' + c.slice(4) : c; }
-
-  $('pairBtn').addEventListener('click', function(){
-    showPairErr('');
-    var n = phone.value.trim();
-    if (!$('terms').checked){ showPairErr('Tick the box to continue.'); return; }
-    if (n.length < 9){ showPairErr('Enter your full number with country code, for example 94768069800.'); phone.focus(); return; }
-    var btn = $('pairBtn'), tk = $('ticket'), code = $('code');
-    btn.disabled = true; btn.textContent = 'Requesting code...';
-    tk.classList.add('show'); code.className = 'ticket-code loading'; code.textContent = 'Generating your code...';
-    $('codeMsg').textContent = ''; $('afterPair').hidden = true;
-    fetch('/code?number=' + encodeURIComponent(n)).then(function(r){
-      return r.json().then(function(d){ return {ok:r.ok, d:d}; });
-    }).then(function(res){
-      if (res.ok && res.d.code){
-        code.className = 'ticket-code'; code.textContent = fmtCode(res.d.code);
-        code.dataset.raw = res.d.code;
-        $('codeMsg').textContent = 'Type this in WhatsApp under Linked devices.';
-        $('afterPair').hidden = false;
-        copyCode(true);
-      } else {
-        tk.classList.remove('show');
-        showPairErr((res.d && res.d.error) ? res.d.error : 'The server could not create a code. Try again in a minute.');
-      }
-    }).catch(function(){
-      tk.classList.remove('show');
-      showPairErr('Could not reach the server. Check your connection and try again.');
-    }).finally(function(){ btn.disabled = false; btn.textContent = 'Get pair code'; });
-  });
-
-  function copyCode(quiet){
-    var raw = $('code').dataset.raw; if (!raw) return;
-    var done = function(){ toast('Code copied'); };
-    if (navigator.clipboard && window.isSecureContext){
-      navigator.clipboard.writeText(raw).then(done, function(){ if(!quiet) toast('Copy failed, select the code by hand', true); });
-    } else {
-      var ta = document.createElement('textarea'); ta.value = raw; ta.style.position = 'fixed'; ta.style.opacity = '0';
-      document.body.appendChild(ta); ta.select();
-      try { document.execCommand('copy'); done(); } catch(e){ if(!quiet) toast('Copy failed, select the code by hand', true); }
-      document.body.removeChild(ta);
-    }
-  }
-  $('copyBtn').addEventListener('click', function(){ copyCode(false); });
-
-  /* ---------- settings ---------- */
-  var TOGGLES = [
-    ['ALWAYS_ONLINE','Always show online','Your number appears online all the time.'],
-    ['ALWAYS_MSG_SEEN','Mark messages as seen','Blue ticks appear as soon as the bot receives a message.'],
-    ['AUTO_TYPING','Show typing','The bot shows "typing..." while it works.'],
-    ['AUTO_RECORDING','Show recording','The bot shows "recording audio..." while it works.'],
-    ['STATUS_VIEW','View statuses','Automatically view contacts\' statuses.'],
-    ['AUTO_LIKE','Like statuses','Automatically react to statuses you view.'],
-    ['ANTI_DELETE','Recover deleted messages','Get a note with the message, who sent it and who deleted it.']
-  ];
-  var TEXTS = ['BOT_NAME','BOT_FOOTER','MOVIE_FOOTER','MOVIE_CAPTION','BOT_IMAGE','PREFIX'];
-  var auth = null, orig = {}, cur = {}, licensed = false;
-
-  function buildToggle(host, key, title, desc){
-    var row = document.createElement('div'); row.className = 'toggle';
-    var t = document.createElement('div'); t.className = 't';
-    var b = document.createElement('b'); b.textContent = title;
-    var s = document.createElement('span'); s.textContent = desc;
-    t.appendChild(b); t.appendChild(s);
-    var sw = document.createElement('button'); sw.type = 'button'; sw.className = 'switch';
-    sw.setAttribute('role','switch'); sw.setAttribute('aria-checked','false'); sw.setAttribute('aria-label', title); sw.dataset.key = key;
-    sw.addEventListener('click', function(){
-      var on = sw.getAttribute('aria-checked') !== 'true';
-      sw.setAttribute('aria-checked', on ? 'true' : 'false'); cur[key] = on ? 'true' : 'false'; markDirty();
-    });
-    row.appendChild(t); row.appendChild(sw); host.appendChild(row);
-  }
-  TOGGLES.forEach(function(x){ buildToggle($('toggles'), x[0], x[1], x[2]); });
-  buildToggle($('btnToggle'), 'BUTTON_MODE', 'Button mode', 'Menus and lists show as tappable buttons instead of numbers.');
-
-  TEXTS.forEach(function(k){
-    var el = $('f_'+k);
-    el.addEventListener('input', function(){ cur[k] = el.value; if (k === 'BOT_IMAGE') showPrev(); markDirty(); });
-  });
-  document.querySelectorAll('#modeSeg button').forEach(function(b){
-    b.addEventListener('click', function(){ cur.MODE = b.dataset.mode; paintMode(); markDirty(); });
-  });
-  function paintMode(){
-    document.querySelectorAll('#modeSeg button').forEach(function(b){ b.setAttribute('aria-pressed', b.dataset.mode === cur.MODE ? 'true' : 'false'); });
-  }
-  function showPrev(){
-    var img = $('imgPrev'), v = $('f_BOT_IMAGE').value.trim();
-    if (/^https?:\/\//i.test(v)){ img.src = v; img.style.display = 'block'; img.onerror = function(){ img.style.display = 'none'; }; }
-    else img.style.display = 'none';
-  }
-  function isDirty(){
-    return Object.keys(cur).some(function(k){ return String(cur[k]) !== String(orig[k]); });
-  }
-  function markDirty(){
-    var d = isDirty();
-    $('saveBtn').disabled = !d;
-    var st = $('saveState'); st.textContent = d ? 'You have unsaved changes' : 'No changes'; st.className = 'state' + (d ? ' dirty' : '');
-  }
-  function fill(data){
-    orig = {}; cur = {};
-    Object.keys(data.settings).forEach(function(k){ orig[k] = data.settings[k]; cur[k] = data.settings[k]; });
-    TEXTS.forEach(function(k){ $('f_'+k).value = cur[k] || ''; });
-    document.querySelectorAll('.switch').forEach(function(sw){ sw.setAttribute('aria-checked', cur[sw.dataset.key] === 'true' ? 'true' : 'false'); });
-    if (!cur.MODE) { cur.MODE = 'public'; orig.MODE = 'public'; }
-    paintMode(); showPrev();
-    var m = data.meta; licensed = !!m.licensed;
-    $('chipNum').textContent = '+' + m.number;
-    $('chipOnline').textContent = m.online ? 'Bot is online' : 'Bot is offline';
-    $('chipOnline').className = 'chip' + (m.online ? '' : ' warn');
-    $('chipLic').textContent = m.master ? 'Owner account' : (m.licensed ? 'Subscription active' : 'No active subscription');
-    $('chipLic').className = 'chip' + (m.licensed ? '' : ' warn');
-    var bsw = document.querySelector('#btnToggle .switch');
-    bsw.disabled = !licensed; $('btnLocked').hidden = licensed;
-    markDirty();
-  }
-  function api(path, body){
-    return fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}).then(function(r){
-      return r.json().then(function(d){ if (!r.ok) throw new Error(d.error || 'Something went wrong'); return d; });
-    });
-  }
-  function showPanel(on){ $('panel').hidden = !on; $('loginCard').hidden = on; }
-  function login(number, key, silent){
-    var btn = $('loginBtn'); btn.disabled = true; btn.textContent = 'Signing in...'; $('loginErr').hidden = true;
-    return api('/code/web/login', {number:number, key:key}).then(function(d){
-      auth = {number:number, key:key}; sessionStorage.setItem('sx_auth', JSON.stringify(auth));
-      fill(d); showPanel(true); if (!silent) toast('Signed in');
-    }).catch(function(e){
-      if (silent){ sessionStorage.removeItem('sx_auth'); return; }
-      $('loginErr').textContent = e.message; $('loginErr').hidden = false;
-    }).finally(function(){ btn.disabled = false; btn.textContent = 'Sign in'; });
-  }
-  $('sNumber').addEventListener('input', function(){ this.value = this.value.replace(/\D/g,''); });
-  $('loginBtn').addEventListener('click', function(){
-    var n = $('sNumber').value.trim(), k = $('sKey').value.trim();
-    if (!n || !k){ $('loginErr').textContent = 'Enter your bot number and access key.'; $('loginErr').hidden = false; return; }
-    login(n, k, false);
-  });
-  $('sKey').addEventListener('keydown', function(e){ if (e.key === 'Enter') $('loginBtn').click(); });
-  $('logoutBtn').addEventListener('click', function(){
-    auth = null; sessionStorage.removeItem('sx_auth'); $('sKey').value = ''; showPanel(false); toast('Signed out');
-  });
-  $('saveBtn').addEventListener('click', function(){
-    if (!auth) return;
-    var btn = $('saveBtn'); btn.disabled = true; btn.textContent = 'Saving...';
-    api('/code/web/save', {number:auth.number, key:auth.key, settings:cur}).then(function(d){
-      fill(d); toast('Settings saved');
-    }).catch(function(e){ toast(e.message, true); markDirty(); })
-      .finally(function(){ btn.textContent = 'Save changes'; markDirty(); });
-  });
-  window.addEventListener('beforeunload', function(e){ if (auth && isDirty()){ e.preventDefault(); e.returnValue = ''; } });
-
-  try {
-    var saved = JSON.parse(sessionStorage.getItem('sx_auth') || 'null');
-    if (saved && saved.number && saved.key){ $('sNumber').value = saved.number; login(saved.number, saved.key, true); }
-  } catch(e){}
-
-  render();
+/* pair */
+var ph=$('phone');ph.addEventListener('input',function(){ph.value=ph.value.replace(/\D/g,'')});
+function err(m){var e=$('err');e.textContent=m;e.hidden=!m}
+function fmt(c){return /^[A-Za-z0-9]{8}$/.test(c)?c.slice(0,4)+'-'+c.slice(4):c}
+function copy(q){var r=$('code').dataset.raw;if(!r)return;function ok(){toast('Code copied')}function bad(){q||toast('Copy failed, select the code by hand')}
+ if(navigator.clipboard&&isSecureContext)navigator.clipboard.writeText(r).then(ok,bad);else{var a=document.createElement('textarea');a.value=r;a.style.cssText='position:fixed;opacity:0';document.body.appendChild(a);a.select();try{document.execCommand('copy');ok()}catch(e){bad()}document.body.removeChild(a)}}
+$('copy').addEventListener('click',function(){copy(false)});
+$('go').addEventListener('click',function(){err('');var n=ph.value.trim();
+ if(!$('terms').checked){err('Tick the box to continue.');return}
+ if(n.length<9){err('Enter your full number with country code, for example 94768069800.');ph.focus();return}
+ var b=$('go'),k=$('tk'),c=$('code');b.disabled=true;b.textContent='Requesting code...';k.classList.add('on');c.className='code ld';c.textContent='Generating your code...';$('tm').textContent='';$('aft').hidden=true;
+ fetch('/code?number='+encodeURIComponent(n)).then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d}})}).then(function(x){
+  if(x.ok&&x.d.code){c.className='code';c.textContent=fmt(x.d.code);c.dataset.raw=x.d.code;$('tm').textContent='Type this in WhatsApp under Linked devices.';$('aft').hidden=false;copy(true)}
+  else{k.classList.remove('on');err((x.d&&x.d.error)||'The server could not create a code. Try again in a minute.')}
+ }).catch(function(){k.classList.remove('on');err('Could not reach the server. Check your connection and try again.')}).finally(function(){b.disabled=false;b.textContent='Get pair code'})});
+render();
 })();
 </script>
 </body>
