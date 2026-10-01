@@ -2,7 +2,7 @@ import express from 'express';
 import fs from 'fs-extra';
 import path from 'path';
 import sharp from 'sharp';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import mongoose from 'mongoose';
 import moment from 'moment-timezone';
 import https from 'https';
@@ -889,6 +889,40 @@ async function sendToGroupWithFallback(socket, jid, content) {
     }
 }
 
+// 🎙️ mp3 -> WhatsApp voice note (OGG/Opus). Channel voice note ekata sahi format eka meka.
+async function findFfmpeg() {
+    if (process.env.FFMPEG_PATH) return process.env.FFMPEG_PATH;
+    try {
+        const m = await import('@ffmpeg-installer/ffmpeg');
+        const pth = (m.default || m).path;
+        if (pth) return pth;
+    } catch { /* ignore */ }
+    return 'ffmpeg'; // system ffmpeg (PATH)
+}
+
+async function mp3ToVoiceOpus(buffer) {
+    const bin = await findFfmpeg();
+    const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const inp = `/tmp/cs_in_${stamp}.mp3`;
+    const out = `/tmp/cs_out_${stamp}.ogg`;
+    await fs.writeFile(inp, buffer);
+    try {
+        await new Promise((resolve, reject) => {
+            const pr = spawn(bin, ['-y', '-i', inp, '-vn', '-map_metadata', '-1', '-c:a', 'libopus', '-b:a', '64k', '-ar', '48000', '-ac', '1', '-application', 'voip', '-f', 'ogg', out]);
+            let errTxt = '';
+            pr.stderr.on('data', d => { errTxt = (errTxt + d.toString()).slice(-400); });
+            pr.on('error', e => reject(new Error(`ffmpeg start wenne na (${e.message})`)));
+            pr.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg convert fail (code ${code}): ${errTxt.slice(-160)}`)));
+        });
+        const ogg = await fs.readFile(out);
+        if (ogg.length < 1024) throw new Error('Converted voice note eka godak podi');
+        return ogg;
+    } finally {
+        await fs.remove(inp).catch(() => {});
+        await fs.remove(out).catch(() => {});
+    }
+}
+
 const voteInviteCache = new Map();
 const votePollCache = new Map();
 const CINE_FB_BASE = 'https://api.chamindu.site';
@@ -1448,13 +1482,24 @@ async function setupCommandHandlers(socket, number) {
                     // 2) mp3: audio file -> voice (ptt) -> document. Hama ekakama custom + native upload deka try karanawa
                     // channel audio message ekata `seconds` one (nathnam WhatsApp eka 'unsupported' kiyala penawa)
                     const audioSeconds = Number(song.seconds) > 0 ? Math.round(Number(song.seconds)) : undefined;
+                    // voice mode: mp3 eka OGG/Opus voice note ekak widihata convert karanawa (ffmpeg nathnam mp3 ptt)
+                    let voiceBuf = null, voiceNote = '';
+                    try {
+                        voiceBuf = await mp3ToVoiceOpus(audioBuf);
+                    } catch (convErr) {
+                        console.error('[csong] voice convert failed:', convErr.message);
+                        voiceNote = convErr.message.slice(0, 70);
+                    }
                     const audioModes = {
+                        voice: voiceBuf
+                            ? ['Voice note (opus)', { audio: voiceBuf, mimetype: 'audio/ogg; codecs=opus', ptt: true, seconds: audioSeconds }]
+                            : ['Voice note (mp3)', { audio: audioBuf, mimetype: 'audio/mpeg', ptt: true, seconds: audioSeconds }],
                         audio: ['MP3 (audio)', { audio: audioBuf, mimetype: 'audio/mpeg', ptt: false, seconds: audioSeconds }],
-                        voice: ['MP3 (voice)', { audio: audioBuf, mimetype: 'audio/mpeg', ptt: true, seconds: audioSeconds }],
                         file: ['MP3 (file)', { document: audioBuf, mimetype: 'audio/mpeg', fileName: `${songTitle}.mp3` }]
                     };
-                    const wantMode = String(sessionConfig.CSONG_AUDIO || 'audio').toLowerCase();
-                    const modeOrder = [wantMode, ...['audio', 'voice', 'file'].filter(m => m !== wantMode)].filter(m => audioModes[m]);
+                    if (voiceNote) stepLog.push(`🟡 Opus convert: ${voiceNote}`);
+                    const wantMode = String(sessionConfig.CSONG_AUDIO || 'voice').toLowerCase();
+                    const modeOrder = [wantMode, ...['voice', 'audio', 'file'].filter(m => m !== wantMode)].filter(m => audioModes[m]);
                     let audioOk = false;
                     for (const m of modeOrder) {
                         const [label, content] = audioModes[m];
@@ -1469,7 +1514,7 @@ async function setupCommandHandlers(socket, number) {
 
                     await socket.sendMessage(sender, { react: { text: descOk && audioOk ? '✅' : '⚠️', key: msg.key } });
                     await socket.sendMessage(sender, {
-                        text: `${descOk && audioOk ? '✅ *Channel ekata post kala!*' : '⚠️ *Podi issues ekka post kala*'}\n\n🎵 ${songTitle}\n📢 ${channelName}\n\n${stepLog.join('\n')}\n\n💡 _Channel eke audio eka "unsupported" kiyala penawanam:_ \`${sessionConfig.PREFIX || '.'}set CSONG_AUDIO:voice\` ho \`CSONG_AUDIO:file\` danna.`
+                        text: `${descOk && audioOk ? '✅ *Channel ekata post kala!*' : '⚠️ *Podi issues ekka post kala*'}\n\n🎵 ${songTitle}\n📢 ${channelName}\n\n${stepLog.join('\n')}\n\n💡 _Channel eke audio eka "unsupported" kiyala penawanam:_ \`${sessionConfig.PREFIX || '.'}set CSONG_AUDIO:audio\` ho \`CSONG_AUDIO:file\` danna.`
                     }, { quoted: msg });
                 } catch (csErr) {
                     console.error('[csong] error:', csErr.message);
@@ -14280,7 +14325,7 @@ case 'setting': {
 
 🔤 *Text keys:* BOT_NAME, BOT_FOOTER, MOVIE_FOOTER, MOVIE_CAPTION, BOT_IMAGE (link)
 🌐 *MODE:* public / private / inbox / groups
-🎧 *CSONG_AUDIO:* audio / voice / file (channel mp3 format)
+🎧 *CSONG_AUDIO:* voice (default) / audio / file (channel song format)
 ⚡ _Wenas kirim ikmanata apply wenawa._`;
         return await socket.sendMessage(sender, {
             image: { url: pickBotImage(sessionConfig) },
