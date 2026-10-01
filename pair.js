@@ -843,29 +843,76 @@ function pickBotImage(sc) {
 // ==========================================================
 
 // 👥 Group ekata movie/file yawana helpers
+// chama-bailez-pro eke groupGetInviteInfo eke bug ekak thiyenawa ("Maximum call stack size exceeded").
+// Eka nisa raw WhatsApp query (w:g2 invite) eken ekama deyai ganna fallback ekak.
+const findChildNode = (node, tag) => (Array.isArray(node?.content) ? node.content.find(c => c.tag === tag) : undefined);
+
+async function groupInviteInfoSafe(socket, code) {
+    try {
+        return await socket.groupGetInviteInfo(code);
+    } catch (e1) {
+        const res = await socket.query({
+            tag: 'iq',
+            attrs: { type: 'get', xmlns: 'w:g2', to: '@g.us' },
+            content: [{ tag: 'invite', attrs: { code } }]
+        });
+        const g = findChildNode(res, 'group');
+        if (!g) throw new Error(`Invite response eka hariyata awe na (${e1.message})`);
+        const at = g.attrs || {};
+        const id = String(at.id || '').includes('@') ? at.id : `${at.id}@g.us`;
+        return {
+            id,
+            subject: at.subject || '',
+            size: at.size ? Number(at.size) : undefined,
+            joinApprovalMode: !!findChildNode(g, 'membership_approval_mode')
+        };
+    }
+}
+
+async function groupAcceptInviteSafe(socket, code) {
+    try {
+        return await socket.groupAcceptInvite(code);
+    } catch (e1) {
+        if (/conflict|already/i.test(e1.message || '')) return null; // dan member
+        const res = await socket.query({
+            tag: 'iq',
+            attrs: { type: 'set', xmlns: 'w:g2', to: '@g.us' },
+            content: [{ tag: 'invite', attrs: { code } }]
+        });
+        return findChildNode(res, 'group')?.attrs?.jid || null;
+    }
+}
+
+// bot eka e group eke inna da: true / false / null (check karanna bari una)
+async function isGroupMember(socket, jid) {
+    try {
+        await socket.groupMetadata(jid);
+        return true;
+    } catch (e) {
+        return /call stack|maximum/i.test(e.message || '') ? null : false;
+    }
+}
+
 async function resolveTargetGroup(socket, linkInput) {
     const m = String(linkInput).match(/chat\.whatsapp\.com\/([A-Za-z0-9_-]+)/);
     const code = m ? m[1] : String(linkInput).trim();
     let info;
     try {
-        info = await socket.groupGetInviteInfo(code);
+        info = await groupInviteInfoSafe(socket, code);
     } catch (e) {
         throw new Error(`Invite link eka balanna baha (${e.message || e}). Link eka revoke / expire wela wenna puluwan. Group eken aluth link ekak ganna.`);
     }
     const jid = info.id;
-    try {
-        await socket.groupMetadata(jid);             // bot eka e group eke inna nam
-    } catch {
+    const member = await isGroupMember(socket, jid);
+    if (member === false) {
         try {
-            await socket.groupAcceptInvite(code);    // nathnam link eken join wenawa
+            await groupAcceptInviteSafe(socket, code);   // bot eka group eke nathnam link eken join wenawa
         } catch (e2) {
             throw new Error(`Group ekata join wenna baha (${e2.message || e2}). Admin approval one wenna puluwan, ho bot number eka kalin e group eken ain karala wenna puluwan.`);
         }
         await new Promise(r => setTimeout(r, 3000));
-        try {
-            await socket.groupMetadata(jid);
-        } catch (e3) {
-            throw new Error(`Join request eka yawwa, eth bot eka dan group eke member na (${e3.message || e3}). Group admin approve karanna one wenna puluwan.`);
+        if ((await isGroupMember(socket, jid)) === false) {
+            throw new Error('Join request eka yawwa, eth bot eka dan group eke member na. Group admin approve karanna one wenna puluwan.');
         }
     }
     return { jid, name: info.subject || 'Group' };
@@ -4079,7 +4126,7 @@ case 'gcheck': {
     const gcLog = [];
     let gcJid = null;
     try {
-        const gi = await socket.groupGetInviteInfo(gcM[1]);
+        const gi = await groupInviteInfoSafe(socket, gcM[1]);
         gcJid = gi.id;
         gcLog.push(`✅ Invite link ok: *${gi.subject || '-'}* (${gi.size ?? '?'} members)`);
         gcLog.push(`${gi.joinApprovalMode ? '⚠️' : '✅'} Join approval: ${gi.joinApprovalMode ? 'ON (admin approve karanna one)' : 'OFF'}`);
@@ -4087,14 +4134,19 @@ case 'gcheck': {
         gcLog.push(`❌ Invite link: ${e.message || e}`);
     }
     if (gcJid) {
-        try {
-            const md = await socket.groupMetadata(gcJid);
-            gcLog.push(`✅ Bot eka group eke member inne (${md.participants?.length ?? '?'} members)`);
-            const me = jidNormalizedUser(socket.user.id);
-            const meP = (md.participants || []).find(x => jidNormalizedUser(x.id) === me || jidNormalizedUser(x.phoneNumber || '') === me);
-            gcLog.push(`${md.announce ? '⚠️' : '✅'} Group: ${md.announce ? 'admins witharai message yawanna puluwan' + (meP?.admin ? ' (bot admin ✅)' : ' (bot admin nemei ❌)') : 'okkotama message yawanna puluwan'}`);
-        } catch (e) {
-            gcLog.push(`❌ Bot eka group eke member na (${e.message || e}) -> .cinesend ekedi join wenna try karanawa`);
+        const mem = await isGroupMember(socket, gcJid);
+        if (mem === true) {
+            try {
+                const md = await socket.groupMetadata(gcJid);
+                gcLog.push(`✅ Bot eka group eke member inne (${md.participants?.length ?? '?'} members)`);
+                const me = jidNormalizedUser(socket.user.id);
+                const meP = (md.participants || []).find(x => jidNormalizedUser(x.id) === me || jidNormalizedUser(x.phoneNumber || '') === me);
+                gcLog.push(`${md.announce ? '⚠️' : '✅'} Group: ${md.announce ? 'admins witharai message yawanna puluwan' + (meP?.admin ? ' (bot admin ✅)' : ' (bot admin nemei ❌)') : 'okkotama message yawanna puluwan'}`);
+            } catch { gcLog.push('✅ Bot eka group eke member inne'); }
+        } else if (mem === null) {
+            gcLog.push('🟡 Member da kiyala check karanna baha (library eke bug ekak). Yawala balanna.');
+        } else {
+            gcLog.push('❌ Bot eka group eke member na -> .cinesend / .singrup eke link eken join wenna try karanawa');
         }
     }
     await socket.sendMessage(sender, { text: `🔎 *Group check*\n\n${gcLog.join('\n')}` }, { quoted: msg });
@@ -4142,9 +4194,9 @@ case 'singrup':
     let targetGroupJid = null;
     let targetGroupName = 'Target Group';
     try {
-        const groupInfo = await socket.groupGetInviteInfo(groupInviteCode);
-        targetGroupJid = groupInfo.id;
-        targetGroupName = groupInfo.subject || targetGroupName;
+        const tg = await resolveTargetGroup(socket, groupLinkInput);
+        targetGroupJid = tg.jid;
+        targetGroupName = tg.name || targetGroupName;
         console.log('✅ Target group JID:', targetGroupJid);
     } catch (groupErr) {
         console.error('Group link error:', groupErr);
