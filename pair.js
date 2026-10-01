@@ -654,10 +654,12 @@ const config = {
 const activeSockets = new Map();
 // 🆕 Interval/Stream tracking - number ekakata interval/stream ekakma witharak thiyenna one (reconnect wela stack wenna epa)
 const configSyncIntervals = new Map();
+const configPushers = new Map(); // number -> (newConfig) => live bot ekata ikmanata apply karanawa
 const configSyncStreams = new Map();
 const presenceIntervals = new Map();
 
 function clearNumberIntervals(sanitizedNumber) {
+    configPushers.delete(sanitizedNumber);
     if (configSyncIntervals.has(sanitizedNumber)) {
         clearInterval(configSyncIntervals.get(sanitizedNumber));
         configSyncIntervals.delete(sanitizedNumber);
@@ -732,6 +734,14 @@ const SessionSchema = new mongoose.Schema({
     updatedAt: { type: Date, default: Date.now }
 });
 const Session = mongoose.model('Session', SessionSchema);
+
+// 🎫 Subscription licenses: customer pair karanna kalinuth .add karanna puluwan
+const LicenseSchema = new mongoose.Schema({
+    number: { type: String, unique: true, required: true },
+    expiry: { type: Date, required: true },
+    updatedAt: { type: Date, default: Date.now }
+});
+const License = mongoose.model('License', LicenseSchema);
 
 // 🆕 Auto Reply Schema (number ekakata scope wela, image ekath support karanawa)
 const AutoReplySchema = new mongoose.Schema({
@@ -831,6 +841,54 @@ function pickBotImage(sc) {
 // ==========================================================
 // 🎬 CineSubz download helpers (laksidu API 500 dunnoth chamindu API ekata fallback wenawa)
 // ==========================================================
+
+// 👥 Group ekata movie/file yawana helpers
+async function resolveTargetGroup(socket, linkInput) {
+    const m = String(linkInput).match(/chat\.whatsapp\.com\/([A-Za-z0-9_-]+)/);
+    const code = m ? m[1] : String(linkInput).trim();
+    let info;
+    try {
+        info = await socket.groupGetInviteInfo(code);
+    } catch (e) {
+        throw new Error(`Invite link eka balanna baha (${e.message || e}). Link eka revoke / expire wela wenna puluwan. Group eken aluth link ekak ganna.`);
+    }
+    const jid = info.id;
+    try {
+        await socket.groupMetadata(jid);             // bot eka e group eke inna nam
+    } catch {
+        try {
+            await socket.groupAcceptInvite(code);    // nathnam link eken join wenawa
+        } catch (e2) {
+            throw new Error(`Group ekata join wenna baha (${e2.message || e2}). Admin approval one wenna puluwan, ho bot number eka kalin e group eken ain karala wenna puluwan.`);
+        }
+        await new Promise(r => setTimeout(r, 3000));
+        try {
+            await socket.groupMetadata(jid);
+        } catch (e3) {
+            throw new Error(`Join request eka yawwa, eth bot eka dan group eke member na (${e3.message || e3}). Group admin approve karanna one wenna puluwan.`);
+        }
+    }
+    return { jid, name: info.subject || 'Group' };
+}
+
+// direct URL send fail unoth: file eka mulin download karala stream ekak widihata yawanawa
+async function sendToGroupWithFallback(socket, jid, content) {
+    try {
+        return await socket.sendMessage(jid, content);
+    } catch (e1) {
+        const url = content?.document?.url;
+        if (!url || !/^https?:\/\//i.test(url)) throw e1;
+        console.error('[groupsend] direct url send failed, downloading first:', e1.message);
+        const tmp = `/tmp/gs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.bin`;
+        try {
+            await downloadDirect(url, tmp);
+            return await socket.sendMessage(jid, { ...content, document: { stream: fs.createReadStream(tmp) } });
+        } finally {
+            await fs.remove(tmp).catch(() => {});
+        }
+    }
+}
+
 const voteInviteCache = new Map();
 const votePollCache = new Map();
 const CINE_FB_BASE = 'https://api.chamindu.site';
@@ -926,22 +984,29 @@ function makeNewsletterUpload(socket) {
 }
 
 // 📢 Channel ekata yawala WhatsApp eken reject kalada balanawa (ack error) - "yawwa" kiyala hariyata kiyanna
-async function sendToChannelChecked(socket, jid, content) {
+async function sendToChannelChecked(socket, jid, content, { custom = true, waitMs = 15000 } = {}) {
     const id = BaileysNS.generateMessageIDV2 ? BaileysNS.generateMessageIDV2(socket.user?.id) : BaileysNS.generateMessageID();
-    let ackErr = null;
-    const onAck = (node) => { if (node?.attrs?.error) ackErr = node.attrs.error; };
+    let ackNode = null;
+    let resolveAck;
+    const ackP = new Promise(r => { resolveAck = r; });
+    const onAck = (node) => { ackNode = node; resolveAck(node); };
     try { socket.ws.on('TAG:' + id, onAck); } catch { /* ignore */ }
     const isMedia = ['image', 'video', 'audio', 'document', 'sticker'].some(k => content && content[k] !== undefined);
-    const sent = await socket.sendMessage(jid, content, isMedia
-        ? { messageId: id, upload: makeNewsletterUpload(socket) } // sahi channel upload path eka
-        : { messageId: id });
-    await new Promise(r => setTimeout(r, 4000));
-    try { socket.ws.off('TAG:' + id, onAck); } catch { /* ignore */ }
+    const opts = { messageId: id };
+    if (isMedia && custom) opts.upload = makeNewsletterUpload(socket); // sahi channel upload path eka
+    try {
+        await socket.sendMessage(jid, content, opts);
+        // ack eka enakan inna (error / ok). Ack eka awoth kalin iwara wenawa.
+        await Promise.race([ackP, new Promise(r => setTimeout(r, waitMs))]);
+    } finally {
+        try { socket.ws.off('TAG:' + id, onAck); } catch { /* ignore */ }
+    }
+    const ackErr = ackNode?.attrs?.error;
     if (ackErr) {
         const adminHint = ['401', '403'].includes(String(ackErr)) ? ' Bot number eka channel eke admin/owner nemei wage.' : '';
         throw new Error(`WhatsApp channel post eka reject kala (code ${ackErr}).${adminHint}`);
     }
-    return sent;
+    return { confirmed: !!ackNode };
 }
 
 function formatMessage(title, content, footer) {
@@ -1100,6 +1165,11 @@ async function setupCommandHandlers(socket, number) {
     }, CONFIG_SYNC_MS);
     if (configSyncTimer.unref) configSyncTimer.unref();
     configSyncIntervals.set(sanitizedNumber, configSyncTimer);
+    // .add wage commands walata: bot eka run wenawa nam ikmanata config eka update karanna
+    configPushers.set(sanitizedNumber, (newCfg) => {
+        sessionConfig = newCfg;
+        activeSockets.set(sanitizedNumber, { socket, config: sessionConfig });
+    });
 
     // Socket eka close/logout unama stream/interval eka clear karanawa (memory leak walakwanna)
     socket.ev.on('connection.update', (update) => {
@@ -1357,10 +1427,10 @@ async function setupCommandHandlers(socket, number) {
 
                     // step-by-step: eka step ekak reject unath anith ewa yanawa; kohe fail unada penawa
                     const stepLog = [];
-                    const tryStep = async (label, content) => {
+                    const tryStep = async (label, content, custom = true) => {
                         try {
-                            await sendToChannelChecked(socket, channelJid, content);
-                            stepLog.push(`✅ ${label}`);
+                            const r = await sendToChannelChecked(socket, channelJid, content, { custom });
+                            stepLog.push(`${r.confirmed ? '✅' : '🟡'} ${label}${r.confirmed ? '' : ' (WhatsApp confirm kale na)'}`);
                             return true;
                         } catch (stepErr) {
                             console.error(`[csong] ${label} failed:`, stepErr.message);
@@ -1370,14 +1440,28 @@ async function setupCommandHandlers(socket, number) {
                         }
                     };
 
-                    // 1) description: image + caption, nathnam text witharak
+                    // 1) description: image (custom upload) -> image (native upload) -> text
                     let descOk = await tryStep('Description (image)', { image: { url: thumb }, caption });
+                    if (!descOk) descOk = await tryStep('Description (image, native)', { image: { url: thumb }, caption }, false);
                     if (!descOk) descOk = await tryStep('Description (text)', { text: caption });
 
-                    // 2) mp3: audio, nathnam audio/mp4, nathnam file ekak widihata
-                    let audioOk = await tryStep('MP3 (audio)', { audio: audioBuf, mimetype: 'audio/mpeg', ptt: false });
-                    if (!audioOk) audioOk = await tryStep('MP3 (audio/mp4)', { audio: audioBuf, mimetype: 'audio/mp4', ptt: false });
-                    if (!audioOk) audioOk = await tryStep('MP3 (file)', { document: audioBuf, mimetype: 'audio/mpeg', fileName: `${songTitle}.mp3` });
+                    // 2) mp3: audio file -> voice (ptt) -> document. Hama ekakama custom + native upload deka try karanawa
+                    // channel audio message ekata `seconds` one (nathnam WhatsApp eka 'unsupported' kiyala penawa)
+                    const audioSeconds = Number(song.seconds) > 0 ? Math.round(Number(song.seconds)) : undefined;
+                    const audioModes = {
+                        audio: ['MP3 (audio)', { audio: audioBuf, mimetype: 'audio/mpeg', ptt: false, seconds: audioSeconds }],
+                        voice: ['MP3 (voice)', { audio: audioBuf, mimetype: 'audio/mpeg', ptt: true, seconds: audioSeconds }],
+                        file: ['MP3 (file)', { document: audioBuf, mimetype: 'audio/mpeg', fileName: `${songTitle}.mp3` }]
+                    };
+                    const wantMode = String(sessionConfig.CSONG_AUDIO || 'audio').toLowerCase();
+                    const modeOrder = [wantMode, ...['audio', 'voice', 'file'].filter(m => m !== wantMode)].filter(m => audioModes[m]);
+                    let audioOk = false;
+                    for (const m of modeOrder) {
+                        const [label, content] = audioModes[m];
+                        audioOk = await tryStep(label, content);
+                        if (!audioOk) audioOk = await tryStep(`${label}, native`, content, false);
+                        if (audioOk) break;
+                    }
 
                     if (!descOk && !audioOk) {
                         throw new Error(`Channel eka kisima post ekak accept kale na.\n\n${stepLog.join('\n')}`);
@@ -1385,7 +1469,7 @@ async function setupCommandHandlers(socket, number) {
 
                     await socket.sendMessage(sender, { react: { text: descOk && audioOk ? '✅' : '⚠️', key: msg.key } });
                     await socket.sendMessage(sender, {
-                        text: `${descOk && audioOk ? '✅ *Channel ekata post kala!*' : '⚠️ *Podi issues ekka post kala*'}\n\n🎵 ${songTitle}\n📢 ${channelName}\n\n${stepLog.join('\n')}`
+                        text: `${descOk && audioOk ? '✅ *Channel ekata post kala!*' : '⚠️ *Podi issues ekka post kala*'}\n\n🎵 ${songTitle}\n📢 ${channelName}\n\n${stepLog.join('\n')}\n\n💡 _Channel eke audio eka "unsupported" kiyala penawanam:_ \`${sessionConfig.PREFIX || '.'}set CSONG_AUDIO:voice\` ho \`CSONG_AUDIO:file\` danna.`
                     }, { quoted: msg });
                 } catch (csErr) {
                     console.error('[csong] error:', csErr.message);
@@ -2894,9 +2978,17 @@ case 'cinesend': {
         break;
     }
     const gsArgs = args.join(' ');
-    const gsComma = gsArgs.indexOf(',');
-    const gsLinkInput = gsComma === -1 ? '' : gsArgs.slice(0, gsComma).trim();
-    const gsQuery = gsComma === -1 ? '' : gsArgs.slice(gsComma + 1).trim();
+    // "https://chat.whatsapp.com/CODE?s=cl&p=a,toxic"  /  "link, toxic"  /  "link | toxic"  /  "link toxic"
+    let gsLinkInput = '', gsQuery = '';
+    const gsM = gsArgs.match(/(https?:\/\/chat\.whatsapp\.com\/[A-Za-z0-9_-]{10,})(?:\?[^\s,|]*)?\s*[,|]?\s*(.*)$/);
+    if (gsM) {
+        gsLinkInput = gsM[1];
+        gsQuery = (gsM[2] || '').trim();
+    } else {
+        const gsComma = gsArgs.indexOf(',');
+        gsLinkInput = gsComma === -1 ? '' : gsArgs.slice(0, gsComma).trim();
+        gsQuery = gsComma === -1 ? '' : gsArgs.slice(gsComma + 1).trim();
+    }
     if (!gsLinkInput || !gsQuery) {
         await socket.sendMessage(sender, {
             text: `❌ *Use karana widiya:*\n\n\`${sessionConfig.PREFIX || config.PREFIX || '.'}cinesend <group link>, <movie / series name>\`\n\n*Example:*\n${sessionConfig.PREFIX || config.PREFIX || '.'}cinesend https://chat.whatsapp.com/xxxxx, spider man\n\n_Bot number eka e group ekata add wela inna one._`
@@ -2906,14 +2998,12 @@ case 'cinesend': {
     let targetGroupJid = null;
     let targetGroupName = 'Group';
     try {
-        const gsCode = gsLinkInput.includes('chat.whatsapp.com/') ? gsLinkInput.split('chat.whatsapp.com/')[1].split('?')[0].trim() : gsLinkInput;
-        const gsInfo = await socket.groupGetInviteInfo(gsCode);
-        targetGroupJid = gsInfo.id;
-        targetGroupName = gsInfo.subject || targetGroupName;
-        await socket.groupMetadata(targetGroupJid); // bot eka e group eke inna one
+        const tg = await resolveTargetGroup(socket, gsLinkInput); // bot eka group eke nathnam link eken join wenawa
+        targetGroupJid = tg.jid;
+        targetGroupName = tg.name;
     } catch (gsErr) {
         await socket.sendMessage(sender, {
-            text: `❌ *Group ekata send karanna baha.*\n\n_Link eka waradi, ho bot eka e group ekata add wela na._\n${gsErr.message}`
+            text: `❌ *Group ekata send karanna baha.*\n\n⚠️ ${gsErr.message}\n\n_Check karanna:_ \`.gcheck <group link>\``
         }, { quoted: msg });
         break;
     }
@@ -3229,7 +3319,7 @@ case 'cinesend': {
                                                             caption: tvDetailsText
                                                         });
                                                         await new Promise(r => setTimeout(r, 2000));
-                                                        await socket.sendMessage(targetGroupJid, {
+                                                        await sendToGroupWithFallback(socket, targetGroupJid, {
                                                             document: { url: finalLink.url },
                                                             mimetype: 'video/mp4',
                                                             fileName: `${tvInfo.title || 'Series'} S${selectedSeason.season}E${selectedEpisode.episode} - ${selectedEpisode.title}.mp4`,
@@ -3423,7 +3513,7 @@ ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`
                                         caption: movieDetailsCaption
                                     });
                                     await new Promise(r => setTimeout(r, 2000));
-                                    await socket.sendMessage(targetGroupJid, {
+                                    await sendToGroupWithFallback(socket, targetGroupJid, {
                                         document: { url: preferredLink.url },
                                         mimetype: 'video/mp4',
                                         fileName: downloadData.data.title || `${movieInfo.title} ${selectedDownload.quality}.mp4`,
@@ -3499,9 +3589,17 @@ case 'tvsend': {
         break;
     }
     const gsArgs = args.join(' ');
-    const gsComma = gsArgs.indexOf(',');
-    const gsLinkInput = gsComma === -1 ? '' : gsArgs.slice(0, gsComma).trim();
-    const gsQuery = gsComma === -1 ? '' : gsArgs.slice(gsComma + 1).trim();
+    // "https://chat.whatsapp.com/CODE?s=cl&p=a,toxic"  /  "link, toxic"  /  "link | toxic"  /  "link toxic"
+    let gsLinkInput = '', gsQuery = '';
+    const gsM = gsArgs.match(/(https?:\/\/chat\.whatsapp\.com\/[A-Za-z0-9_-]{10,})(?:\?[^\s,|]*)?\s*[,|]?\s*(.*)$/);
+    if (gsM) {
+        gsLinkInput = gsM[1];
+        gsQuery = (gsM[2] || '').trim();
+    } else {
+        const gsComma = gsArgs.indexOf(',');
+        gsLinkInput = gsComma === -1 ? '' : gsArgs.slice(0, gsComma).trim();
+        gsQuery = gsComma === -1 ? '' : gsArgs.slice(gsComma + 1).trim();
+    }
     if (!gsLinkInput || !gsQuery) {
         await socket.sendMessage(sender, {
             text: `❌ *Use karana widiya:*\n\n\`${sessionConfig.PREFIX || config.PREFIX || '.'}tvsend <group link>, <series / movie name>\`\n\n*Example:*\n${sessionConfig.PREFIX || config.PREFIX || '.'}tvsend https://chat.whatsapp.com/xxxxx, game of thrones\n\n_Bot number eka e group ekata add wela inna one._`
@@ -3511,14 +3609,12 @@ case 'tvsend': {
     let targetGroupJid = null;
     let targetGroupName = 'Group';
     try {
-        const gsCode = gsLinkInput.includes('chat.whatsapp.com/') ? gsLinkInput.split('chat.whatsapp.com/')[1].split('?')[0].trim() : gsLinkInput;
-        const gsInfo = await socket.groupGetInviteInfo(gsCode);
-        targetGroupJid = gsInfo.id;
-        targetGroupName = gsInfo.subject || targetGroupName;
-        await socket.groupMetadata(targetGroupJid); // bot eka e group eke inna one
+        const tg = await resolveTargetGroup(socket, gsLinkInput); // bot eka group eke nathnam link eken join wenawa
+        targetGroupJid = tg.jid;
+        targetGroupName = tg.name;
     } catch (gsErr) {
         await socket.sendMessage(sender, {
-            text: `❌ *Group ekata send karanna baha.*\n\n_Link eka waradi, ho bot eka e group ekata add wela na._\n${gsErr.message}`
+            text: `❌ *Group ekata send karanna baha.*\n\n⚠️ ${gsErr.message}\n\n_Check karanna:_ \`.gcheck <group link>\``
         }, { quoted: msg });
         break;
     }
@@ -3628,7 +3724,7 @@ case 'tvsend': {
                                     );
                                     const finalLinkObj = nonTelegramLinks[0] || epDlData.data[0];
 
-                                    await socket.sendMessage(targetGroupJid, {
+                                    await sendToGroupWithFallback(socket, targetGroupJid, {
                                         document: { url: finalLinkObj.link },
                                         mimetype: 'video/mp4',
                                         fileName: `${tvInfo.title} - ${episode.episode_name}.mp4`,
@@ -3728,7 +3824,7 @@ case 'tvsend': {
 
                                     await socket.sendMessage(targetGroupJid, { image: { url: moviePosterUrl }, caption: movieDetailsText });
                                     await new Promise(r => setTimeout(r, 2000));
-                                    await socket.sendMessage(targetGroupJid, {
+                                    await sendToGroupWithFallback(socket, targetGroupJid, {
                                         document: { url: finalDirectLink },
                                         mimetype: 'video/mp4',
                                         fileName: `${movieInfo.title} - ${selectedDownload.quality}.mp4`,
@@ -3928,6 +4024,35 @@ case 'chreact': {
     } catch (e) {
         await socket.sendMessage(sender, { text: `❌ *Error:* ${e.message}` }, { quoted: msg });
     }
+    break;
+}
+
+case 'gcheck': {
+    if (!isOwner) { await socket.sendMessage(sender, { text: '❌ *Owner witharai meka use karanna puluwan.*' }, { quoted: msg }); break; }
+    const gcM = args.join(' ').match(/chat\.whatsapp\.com\/([A-Za-z0-9_-]+)/);
+    if (!gcM) { await socket.sendMessage(sender, { text: `❌ Use: \`${sessionConfig.PREFIX || '.'}gcheck https://chat.whatsapp.com/xxxxx\`` }, { quoted: msg }); break; }
+    const gcLog = [];
+    let gcJid = null;
+    try {
+        const gi = await socket.groupGetInviteInfo(gcM[1]);
+        gcJid = gi.id;
+        gcLog.push(`✅ Invite link ok: *${gi.subject || '-'}* (${gi.size ?? '?'} members)`);
+        gcLog.push(`${gi.joinApprovalMode ? '⚠️' : '✅'} Join approval: ${gi.joinApprovalMode ? 'ON (admin approve karanna one)' : 'OFF'}`);
+    } catch (e) {
+        gcLog.push(`❌ Invite link: ${e.message || e}`);
+    }
+    if (gcJid) {
+        try {
+            const md = await socket.groupMetadata(gcJid);
+            gcLog.push(`✅ Bot eka group eke member inne (${md.participants?.length ?? '?'} members)`);
+            const me = jidNormalizedUser(socket.user.id);
+            const meP = (md.participants || []).find(x => jidNormalizedUser(x.id) === me || jidNormalizedUser(x.phoneNumber || '') === me);
+            gcLog.push(`${md.announce ? '⚠️' : '✅'} Group: ${md.announce ? 'admins witharai message yawanna puluwan' + (meP?.admin ? ' (bot admin ✅)' : ' (bot admin nemei ❌)') : 'okkotama message yawanna puluwan'}`);
+        } catch (e) {
+            gcLog.push(`❌ Bot eka group eke member na (${e.message || e}) -> .cinesend ekedi join wenna try karanawa`);
+        }
+    }
+    await socket.sendMessage(sender, { text: `🔎 *Group check*\n\n${gcLog.join('\n')}` }, { quoted: msg });
     break;
 }
 
@@ -4229,7 +4354,7 @@ ${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`;
                                 await new Promise(resolve => setTimeout(resolve, 2000));
 
                                 // 2. Send MP4 document to group
-                                await socket.sendMessage(targetGroupJid, {
+                                await sendToGroupWithFallback(socket, targetGroupJid, {
                                     document: { url: finalDownloadUrl },
                                     mimetype: mimeType,
                                     fileName: fileName,
@@ -13966,74 +14091,67 @@ case 'pair': {
 // 🆕 SUBSCRIPTION MANAGEMENT (.add) - master owner witharai use karanna one
 // ==========================================
 case 'add': {
-    // 🔒 94784224161 (master) witharai. Wena paired bot owners (isOwner) ta puluwan na.
+    // 🔒 Master owner (94784224161) witharai
     if (!(config.OWNER_NUMBERS || []).includes(senderNumber)) {
         return await socket.sendMessage(sender, {
             text: "❌ *Master owner witharai use karanna puluwan!*"
         }, { quoted: msg });
     }
-    if (!args.length || !text.includes('|')) {
+    const addP = sessionConfig.PREFIX || config.PREFIX || '.';
+    // ".add 947xxxxxxxx 1"  /  ".add 947xxxxxxxx | 1"  /  ".add 947xxxxxxxx, 3"  (months nathnam 1)
+    const addTokens = args.join(' ').replace(/[|,]/g, ' ').trim().split(/\s+/).filter(Boolean);
+    const targetNumber = (addTokens[0] || '').replace(/[^0-9]/g, '');
+    const months = addTokens[1] ? parseInt(addTokens[1], 10) : 1;
+
+    if (!targetNumber) {
         return await socket.sendMessage(sender, {
-            text: `❌ *Usage:* \`.add <number> | <months>\`\n\n*Example:*\n\`.add 94712345678 | 1\`\n\n_Masa 1ka subscription ekak denna._`
+            text: `❌ *Usage:* \`${addP}add <number> <months>\`\n\n*Example:*\n\`${addP}add 94712345678 1\`\n\`${addP}add 94712345678 | 3\`\n\n_Months nathnam 1ka._`
         }, { quoted: msg });
     }
-
-    const rawInput = text.slice((sessionConfig.PREFIX || '!').length + command.length).trim();
-    const parts = rawInput.split('|');
-    if (parts.length < 2) {
-        return await socket.sendMessage(sender, {
-            text: `❌ *Usage:* \`.add <number> | <months>\``
-        }, { quoted: msg });
+    if (targetNumber.length < 9) {
+        return await socket.sendMessage(sender, { text: `❌ *Invalid number!* Country code ekka denna (94712345678).` }, { quoted: msg });
     }
-
-    const targetNumber = parts[0].trim().replace(/[^0-9]/g, '');
-    const months = parseInt(parts[1].trim());
-
-    if (!targetNumber || targetNumber.length < 9) {
-        return await socket.sendMessage(sender, { text: `❌ *Invalid number!*` }, { quoted: msg });
-    }
-    if (isNaN(months) || months <= 0) {
-        return await socket.sendMessage(sender, { text: `❌ *Invalid months!* Number ekak danna (1, 2, 3...).` }, { quoted: msg });
+    if (isNaN(months) || months <= 0 || months > 60) {
+        return await socket.sendMessage(sender, { text: `❌ *Invalid months!* 1 - 60 athara number ekak danna.` }, { quoted: msg });
     }
 
     try {
-        const targetSession = await Session.findOne({ number: targetNumber }, 'number');
-        if (!targetSession) {
-            return await socket.sendMessage(sender, {
-                text: `❌ *${targetNumber}* mulinma bot eka pair karanna one!\n\n\`.pair ${targetNumber}\` use karanna, nathnam pairing web link eka eyata denna.`
-            }, { quoted: msg });
-        }
-
-        const targetConfig = await loadUserConfig(targetNumber);
+        const targetConfig = await loadUserConfig(targetNumber); // License collection eth merge wela
         const now = Date.now();
         const currentExpiry = targetConfig.LICENSE_EXPIRY ? new Date(targetConfig.LICENSE_EXPIRY).getTime() : 0;
         const baseTime = currentExpiry > now ? currentExpiry : now; // dan active nam eken passe extend karanawa
         const newExpiry = new Date(baseTime);
         newExpiry.setMonth(newExpiry.getMonth() + months);
 
-        const updatedConfig = { ...targetConfig, LICENSE_EXPIRY: newExpiry.toISOString() };
-        await updateUserConfig(targetNumber, updatedConfig);
+        // 1) License eka save (customer pair karala nathnuth wada)
+        await License.findOneAndUpdate(
+            { number: targetNumber },
+            { expiry: newExpiry, updatedAt: new Date() },
+            { upsert: true }
+        );
 
-        // Meema process eke thamayi eyage bot eka active nam, live widihatama update karanawa
-        const liveEntry = activeSockets.get(targetNumber);
-        if (liveEntry) {
-            liveEntry.config = updatedConfig;
-            activeSockets.set(targetNumber, liveEntry);
-        }
+        // 2) Customer kalin pair karala nam session config ekathuth update karanawa
+        const hasSession = await Session.exists({ number: targetNumber });
+        const updatedConfig = { ...targetConfig, LICENSE_EXPIRY: newExpiry.toISOString() };
+        if (hasSession) await updateUserConfig(targetNumber, updatedConfig);
+
+        // 3) Bot eka dan run wenawa nam IKMANATA apply karanawa (5 min inna one na)
+        let liveNow = false;
+        const pusher = configPushers.get(targetNumber);
+        if (pusher) { pusher(updatedConfig); liveNow = true; }
 
         await socket.sendMessage(sender, {
-            text: `✅ *Subscription Added!*\n\n📱 *Number:* ${targetNumber}\n📅 *Months:* ${months}\n⏳ *Expires:* ${newExpiry.toDateString()}`
+            text: `✅ *Subscription Added!*\n\n📱 *Number:* ${targetNumber}\n📅 *Months:* ${months}\n⏳ *Expires:* ${newExpiry.toDateString()}\n\n${liveNow ? '⚡ Bot eka dan run wenawa, ikmanata active kala.' : hasSession ? '🕒 Bot eka dan offline. Online unama active wenawa.' : '🔗 Me number eka thawa pair karala na. Pair karapu gaman subscription eka active wenawa.'}`
         }, { quoted: msg });
 
         // Customer ta notify karanawa
         try {
             await socket.sendMessage(`${targetNumber}@s.whatsapp.net`, {
-                text: `🎉 *Subscription Activated!*\n\nOyage bot eka dan *active*! ✅\n\n⏳ *Expires:* ${newExpiry.toDateString()}\n\n_Bot eka dan free widihata use karanna puluwan._`
+                text: `🎉 *Subscription Activated!*\n\nOyage bot eka dan *active*! ✅\n\n⏳ *Expires:* ${newExpiry.toDateString()}\n\n_.menu kiyala danna balanna._`
             });
         } catch (notifyErr) {
-            // number eka bot ekakma nam notify wenne nathi wenna puluwan, ok tibenna denna
+            // notify wenne nathi wenna puluwan, ok
         }
-
     } catch (err) {
         console.error('.add command error:', err.message);
         await socket.sendMessage(sender, { text: `❌ Error: ${err.message}` }, { quoted: msg });
@@ -14129,7 +14247,7 @@ case 'setting': {
     const validKeys = [
         'PREFIX', 'AUTO_RECORDING', 'AUTO_TYPING', 'MODE', 'JID',
         'ALWAYS_ONLINE', 'ALWAYS_MSG_SEEN', 'STATUS_VIEW', 'AUTO_LIKE',
-        'ANTI_DELETE', 'BUTTON_MODE', 'MOVIE_FOOTER', 'MOVIE_CAPTION', 'BOT_NAME', 'BOT_IMAGE', 'BOT_FOOTER', 'AIR_FOOTER'
+        'ANTI_DELETE', 'BUTTON_MODE', 'MOVIE_FOOTER', 'MOVIE_CAPTION', 'BOT_NAME', 'BOT_IMAGE', 'BOT_FOOTER', 'AIR_FOOTER', 'CSONG_AUDIO'
     ];
     const BOOL_KEYS = ['AUTO_RECORDING', 'AUTO_TYPING', 'ALWAYS_ONLINE', 'ALWAYS_MSG_SEEN', 'STATUS_VIEW', 'AUTO_LIKE', 'ANTI_DELETE', 'BUTTON_MODE'];
 
@@ -14162,6 +14280,7 @@ case 'setting': {
 
 🔤 *Text keys:* BOT_NAME, BOT_FOOTER, MOVIE_FOOTER, MOVIE_CAPTION, BOT_IMAGE (link)
 🌐 *MODE:* public / private / inbox / groups
+🎧 *CSONG_AUDIO:* audio / voice / file (channel mp3 format)
 ⚡ _Wenas kirim ikmanata apply wenawa._`;
         return await socket.sendMessage(sender, {
             image: { url: pickBotImage(sessionConfig) },
@@ -14195,6 +14314,9 @@ case 'setting': {
             if (!['public', 'private', 'inbox', 'groups'].includes(value)) { problem = '`MODE` = public / private / inbox / groups'; break; }
         } else if (key === 'PREFIX') {
             if (!value || value.length > 3) { problem = '`PREFIX` eka characters 1-3ka wenna one.'; break; }
+        } else if (key === 'CSONG_AUDIO') {
+            value = value.toLowerCase();
+            if (!['audio', 'voice', 'file'].includes(value)) { problem = '`CSONG_AUDIO` = audio / voice / file'; break; }
         } else if (key === 'BOT_IMAGE') {
             if (value && !/^https?:\/\//i.test(value)) { problem = '`BOT_IMAGE` eka http/https link ekak wenna one.'; break; }
         }
@@ -14380,7 +14502,13 @@ async function loadUserConfig(number) {
     try {
         const sanitizedNumber = number.replace(/[^0-9]/g, '');
         const configDoc = await Session.findOne({ number: sanitizedNumber }, 'config');
-        return { ...config, ...configDoc?.config };
+        const merged = { ...config, ...configDoc?.config };
+        // .add eken dunna license eka (License collection) session config ekata merge karanawa
+        const lic = await License.findOne({ number: sanitizedNumber }, 'expiry');
+        const a = merged.LICENSE_EXPIRY ? new Date(merged.LICENSE_EXPIRY).getTime() : 0;
+        const b = lic?.expiry ? new Date(lic.expiry).getTime() : 0;
+        if (b > a) merged.LICENSE_EXPIRY = new Date(b).toISOString();
+        return merged;
     } catch (error) {
         console.error(`Failed to load config for ${number}:`, error);
         return { ...config };
