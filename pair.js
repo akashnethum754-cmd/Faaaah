@@ -742,6 +742,77 @@ const LicenseSchema = new mongoose.Schema({
     expiry: { type: Date, required: true },
     updatedAt: { type: Date, default: Date.now }
 });
+// ==========================================
+// 🌐 Third-party movie APIs: central config + auto retry
+//   .env eke  CHAMINDU_API_KEY=...  /  CHAMINDU_API_BASE=...  dala key/url eka wenas karanna puluwan
+// ==========================================
+const CH_KEY = process.env.CHAMINDU_API_KEY || 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+const CH_BASE = process.env.CHAMINDU_API_BASE || 'https://api.chamindu.site';
+
+axios.defaults.headers.common['User-Agent'] = 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36';
+axios.defaults.headers.common['Accept'] = 'application/json, text/plain, */*';
+
+// GET request fail unoth (timeout / 429 / 5xx) 2 parak auto retry; ita passe pm2 logs wala clear error ekak
+axios.interceptors.response.use((r) => r, async (e) => {
+    const cfg = e.config;
+    const status = e.response?.status;
+    const retryable = !status || [408, 425, 429, 500, 502, 503, 504, 522, 524].includes(status);
+    if (cfg && String(cfg.method).toLowerCase() === 'get' && retryable && (cfg.__retry || 0) < 2 && !axios.isCancel(e)) {
+        cfg.__retry = (cfg.__retry || 0) + 1;
+        await new Promise((r) => setTimeout(r, 1500 * cfg.__retry));
+        return axios.request(cfg);
+    }
+    try {
+        const u = new URL(cfg?.url || '', cfg?.baseURL);
+        console.error(`[API FAIL] ${u.host}${u.pathname} -> ${status || e.code || e.message}`);
+    } catch (_) {}
+    if (status) e.message = `API ${status}: ${e.response?.data?.message || e.response?.data?.error || e.message}`;
+    return Promise.reject(e);
+});
+
+
+// 🔎 .apicheck : movie APIs hama ekakatama search ekak gahala ✅/❌ report ekak (master number witharai)
+async function runApiChecks() {
+    const Q = 'avatar';
+    const ch = (name, p) => ({ name, url: `${CH_BASE}${p}`, params: { q: Q, api_key: CH_KEY } });
+    const probes = [
+        { name: 'cinesubz (laksidu)', url: 'https://apis.laksidu.site/cinesubz/search', params: { query: Q, api_key: 'lakiyaofc2' } },
+        { name: 'sinhalasub (zara)', url: `${config.API_MAIN_URL}/sinhalasub/search`, params: { query: Q, api_key: config.API_KEY } },
+        ch('cinesubz (chamindu)', '/api/v1/movie/cinesubz/search'), ch('dinkamovies', '/api/v1/movie/dinkamovies/search'),
+        ch('moviehubbd', '/api/v1/movies/moviehubbd/search'), ch('cineverse (.movie)', '/api/v1/movies/cineverselk/search'),
+        ch('lakvision', '/api/v1/movie/lakvision/search'), ch('piratelk', '/api/v1/movie/piratelk/search'),
+        ch('subzlk', '/api/v1/movies/subzlk/search'), ch('tamilmv', '/api/v1/movie/tamilmv/search'),
+        ch('cinemx', '/api/v1/movies/cinemx/search'), ch('moviemania', '/api/v1/movies/moviemanialk/search'),
+        ch('moviesublk', '/api/v1/movies/moviesublkcom/search'), ch('chithrapata', '/api/v1/chithrapata/search'),
+        ch('sinhalatop', '/api/v1/cartoons/sinhalatop/search'), ch('cartoons', '/api/v1/movies/cartoons/search'),
+        ch('sinhalacartoons', '/api/v1/cartoons/sinhalacartoons/search'), ch('animexin', '/api/v1/anime/animexin/search'),
+        ch('watchwrestling', '/api/v1/wrestling/watchwrestling/search'),
+        { name: 'dubzone (heroku)', url: 'https://api-siteh-22e22e4cb068.herokuapp.com/api/dubzone/search', params: { q: Q } },
+        { name: 'thinkiri (heroku)', url: 'https://api-siteh-22e22e4cb068.herokuapp.com/tinkiri/search', params: { q: Q } },
+        { name: 'vault (lovable)', url: 'https://stream-vault-api.lovable.app/api/public/v1/search', params: { q: Q } }
+    ];
+    const shape = (d) => {
+        if (d == null) return 'empty';
+        if (typeof d === 'string') return d.trim().startsWith('<') ? 'HTML page (API down/blocked)' : `text: ${d.slice(0, 50)}`;
+        const arr = Array.isArray(d.data) ? d.data : Array.isArray(d.results) ? d.results : Array.isArray(d) ? d : null;
+        if (arr) return `${arr.length} results`;
+        if (d.status === false || d.success === false) return `API error: ${String(d.message || d.error || '').slice(0, 60)}`;
+        return `keys: ${Object.keys(d).slice(0, 4).join(',')}`;
+    };
+    const out = await Promise.all(probes.map(async (p) => {
+        const t = Date.now();
+        try {
+            const r = await axios.get(p.url, { params: p.params, timeout: 25000, validateStatus: () => true });
+            const info = shape(r.data);
+            const ok = r.status === 200 && /results|keys/.test(info) && !/^0 results/.test(info);
+            return { ok, text: `${ok ? '✅' : '❌'} ${p.name} - HTTP ${r.status}, ${info} (${Date.now() - t}ms)` };
+        } catch (e) {
+            return { ok: false, text: `❌ ${p.name} - ${e.code || e.message} (${Date.now() - t}ms)` };
+        }
+    }));
+    return out.sort((a, b) => Number(b.ok) - Number(a.ok) || a.text.localeCompare(b.text));
+}
+
 const License = mongoose.model('License', LicenseSchema);
 
 // ==========================================
@@ -1075,8 +1146,8 @@ async function mp3ToVoiceOpus(buffer) {
 
 const voteInviteCache = new Map();
 const votePollCache = new Map();
-const CINE_FB_BASE = 'https://api.chamindu.site';
-const CINE_FB_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+const CINE_FB_BASE = CH_BASE;
+const CINE_FB_KEY = CH_KEY;
 const cineNorm = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 async function cineGetWithRetry(url) {
@@ -3830,9 +3901,9 @@ case 'tvsend': {
         text: `*❪ SEARCHING ❫*\n\n🔍 *Searching Movies...*\n⚡ _Please wait a moment._`
     });
 
-    const API_BASE = "https://api.chamindu.site";
-    const API_KEY = "chama_api_11230a80e5eed3c1b80bfcc5d1773ec9"; // ඔබේ API Key එක දාන්න
-    const DEFAULT_IMAGE = "https://api.chamindu.site/logo.png";
+    const API_BASE = CH_BASE;
+    const API_KEY = CH_KEY; // ඔබේ API Key එක දාන්න
+    const DEFAULT_IMAGE = CH_BASE + '/logo.png';
 
     try {
         const searchResponse = await axios.get(`${API_BASE}/api/v1/movie/cinesubz/search?q=${encodeURIComponent(cinesubQuery)}&api_key=${API_KEY}`);
@@ -4820,8 +4891,8 @@ case 'dinkamovieslk': {
     }
 
     const dinkaQuery = args.join(' ').trim();
-    const DINKA_API_BASE = 'https://api.chamindu.site/api/v1/movie/dinkamovies';
-    const DINKA_API_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+    const DINKA_API_BASE = CH_BASE + '/api/v1/movie/dinkamovies';
+    const DINKA_API_KEY = CH_KEY;
 
     let dinkaSelectionListener = null;
     let dinkaOptionListener = null;
@@ -5268,8 +5339,8 @@ case 'bw': {
     }
 
     const query = args.join(' ');
-    const API_BASE = 'https://api.chamindu.site/api/v1/movies/moviehubbd';
-    const API_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+    const API_BASE = CH_BASE + '/api/v1/movies/moviehubbd';
+    const API_KEY = CH_KEY;
     const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
     const REQUEST_TIMEOUT = 600000; // 10 min
 
@@ -5707,8 +5778,8 @@ case 'cv': {
     }
 
     const query = args.join(' ');
-    const API_BASE = 'https://api.chamindu.site/api/v1/movies/cineverselk';
-    const API_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+    const API_BASE = CH_BASE + '/api/v1/movies/cineverselk';
+    const API_KEY = CH_KEY;
 
     // ⚙️ CONFIG
     const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
@@ -5916,7 +5987,7 @@ case 'cv': {
                     const tag = selected.season
                         ? `S${String(selected.season).padStart(2, '0')}E${String(selected.episode).padStart(2, '0')}`
                         : 'Movie';
-                    const cleanTitle = data.title.replace(/[^\w\s-]/g, '').trim();
+                    const cleanTitle = String(data.title || 'Movie').replace(/[^\w\s-]/g, '').trim();
                     const fileName = `${cleanTitle} ${tag} ${selected.quality || 'HD'}.mp4`.replace(/\s+/g, ' ');
 
                     await socket.sendMessage(sender, { react: { text: '📥', key: dlMek.key } });
@@ -6026,9 +6097,9 @@ case 'lv': {
     }
 
     const query = args.join(' ').trim();
-    const API_BASE = "https://api.chamindu.site";
-    const API_KEY = "chama_api_11230a80e5eed3c1b80bfcc5d1773ec9";
-    const DEFAULT_IMAGE = "https://api.chamindu.site/logo.png";
+    const API_BASE = CH_BASE;
+    const API_KEY = CH_KEY;
+    const DEFAULT_IMAGE = CH_BASE + '/logo.png';
 
     let lvSelectionListener = null;
     let lvDownloadListener = null;
@@ -6283,9 +6354,9 @@ case 'plk': {
     }
 
     const query = args.join(' ').trim();
-    const API_BASE = "https://api.chamindu.site";
-    const API_KEY = "chama_api_11230a80e5eed3c1b80bfcc5d1773ec9";
-    const DEFAULT_IMAGE = "https://api.chamindu.site/logo.png";
+    const API_BASE = CH_BASE;
+    const API_KEY = CH_KEY;
+    const DEFAULT_IMAGE = CH_BASE + '/logo.png';
 
     let plkSelectionListener = null;
     let plkDownloadListener = null;
@@ -6930,8 +7001,8 @@ case 'ytmp3': {
         }, { quoted: msg });
     }
 
-    const API_BASE = "https://api.chamindu.site";
-    const API_KEY = "chama_api_11230a80e5eed3c1b80bfcc5d1773ec9";
+    const API_BASE = CH_BASE;
+    const API_KEY = CH_KEY;
 
     // ⭐ Server download
     const downloadToServer = async (url, dest) => {
@@ -7074,9 +7145,9 @@ case 'ax': {
     }
 
     const query = args.join(' ').trim();
-    const API_BASE = "https://api.chamindu.site";
-    const API_KEY = "chama_api_11230a80e5eed3c1b80bfcc5d1773ec9";
-    const DEFAULT_IMAGE = "https://api.chamindu.site/logo.png";
+    const API_BASE = CH_BASE;
+    const API_KEY = CH_KEY;
+    const DEFAULT_IMAGE = CH_BASE + '/logo.png';
 
     let axSelectionListener = null;
     let axDownloadListener = null;
@@ -7426,9 +7497,9 @@ case 'cmovie': {
     }
 
     const cinesubQuery = args.join(' ').trim();
-    const API_BASE = "https://api.chamindu.site";
-    const API_KEY = "chama_api_11230a80e5eed3c1b80bfcc5d1773ec9";
-    const DEFAULT_IMAGE = "https://api.chamindu.site/logo.png";
+    const API_BASE = CH_BASE;
+    const API_KEY = CH_KEY;
+    const DEFAULT_IMAGE = CH_BASE + '/logo.png';
 
     let csSelectionListener = null;
     let csDownloadListener = null;
@@ -7832,7 +7903,7 @@ case 'watchwrestling': {
         
         try {
             await socket.sendMessage(chatJid, {
-                image: { url: sessionConfig?.BOT_IMAGE || config?.BOT_IMAGE || 'https://api.chamindu.site/logo.png' },
+                image: { url: sessionConfig?.BOT_IMAGE || config?.BOT_IMAGE || CH_BASE + '/logo.png' },
                 caption: errorCaption
             }, { quoted: msg });
         } catch {
@@ -7842,8 +7913,8 @@ case 'watchwrestling': {
     }
 
     const wrestlingQuery = args.join(' ').trim();
-    const API_BASE = 'https://api.chamindu.site/api/v1/wrestling/watchwrestling';
-    const API_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+    const API_BASE = CH_BASE + '/api/v1/wrestling/watchwrestling';
+    const API_KEY = CH_KEY;
 
     let wrestlingSelectionListener = null;
     let wrestlingDownloadListener = null;
@@ -8115,8 +8186,8 @@ case 'subz': {
     }
 
     const movieQuery = args.join(' ').trim();
-    const API_BASE = 'https://api.chamindu.site/api/v1/movies/subzlk';
-    const API_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+    const API_BASE = CH_BASE + '/api/v1/movies/subzlk';
+    const API_KEY = CH_KEY;
 
     let subzSelectionListener = null;
     let subzDownloadListener = null;
@@ -8402,8 +8473,8 @@ case 'tamil': {
     }
 
     const movieQuery = args.join(' ');
-    const API_BASE = 'https://api.chamindu.site/api/v1/movie/tamilmv';
-    const API_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+    const API_BASE = CH_BASE + '/api/v1/movie/tamilmv';
+    const API_KEY = CH_KEY;
     const TEMP_DIR = './tmp_tamilmv';
 
     const TIMEOUT_API = 120000;
@@ -8689,8 +8760,8 @@ case 'cmx': {
     }
 
     const movieQuery = args.join(' ');
-    const API_BASE = 'https://api.chamindu.site/api/v1/movies/cinemx';
-    const API_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+    const API_BASE = CH_BASE + '/api/v1/movies/cinemx';
+    const API_KEY = CH_KEY;
     const TEMP_DIR = './tmp_cinemx';
 
     // ⏱️ TIMEOUTS
@@ -9263,8 +9334,8 @@ case 'mmlk': {
     }
 
     const mmQuery = args.join(' ');
-    const API_BASE = 'https://api.chamindu.site/api/v1/movies/moviemanialk';
-    const API_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+    const API_BASE = CH_BASE + '/api/v1/movies/moviemanialk';
+    const API_KEY = CH_KEY;
     const TEMP_DIR = './tmp_moviemania';
 
     // ⏱️ TIMEOUTS
@@ -9552,8 +9623,8 @@ case 'game': {
         MAX_PARTS: 30
     };
 
-    const API_BASE = "https://api.chamindu.site";
-    const API_KEY = "chama_api_11230a80e5eed3c1b80bfcc5d1773ec9";
+    const API_BASE = CH_BASE;
+    const API_KEY = CH_KEY;
     const DEFAULT_IMAGE = "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=500";
 
     function getCircledNumber(num) {
@@ -10023,8 +10094,8 @@ case 'sinhalacartoon': {
     }
 
     const cartoonQuery = args.join(' ');
-    const API_BASE = 'https://api.chamindu.site/api/v1/movies/cartoons';
-    const API_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+    const API_BASE = CH_BASE + '/api/v1/movies/cartoons';
+    const API_KEY = CH_KEY;
 
     let cartoonSelectionListener = null;
     let cartoonEpisodeListener = null;
@@ -10249,8 +10320,8 @@ case 'chmovie': {
     }
 
     const chithraQuery = args.join(' ');
-    const API_BASE = 'https://api.chamindu.site/api/v1/chithrapata';
-    const API_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+    const API_BASE = CH_BASE + '/api/v1/chithrapata';
+    const API_KEY = CH_KEY;
 
     let chithraSelectionListener = null;
     let chithraDownloadListener = null;
@@ -10284,7 +10355,7 @@ case 'chmovie': {
         // ═══ STEP 1 : SEARCH (Movies + TV) ═══
         const [moviesRes, tvRes] = await Promise.all([
             axios.get(`${API_BASE}/search`, { params: { q: chithraQuery, api_key: API_KEY }, timeout: 120000 }).catch(() => ({ data: { results: [] } })),
-            axios.get(`https://api.chamindu.site/api/v1/tv/chithrapata/search`, { params: { q: chithraQuery, api_key: API_KEY }, timeout: 120000 }).catch(() => ({ data: { results: [] } }))
+            axios.get(`${CH_BASE}/api/v1/tv/chithrapata/search`, { params: { q: chithraQuery, api_key: API_KEY }, timeout: 120000 }).catch(() => ({ data: { results: [] } }))
         ]);
 
         const movieResults = (moviesRes.data?.results || []).map(r => ({ ...r, _type: 'movie' }));
@@ -10337,7 +10408,7 @@ case 'chmovie': {
             try {
                 // ─── TV SERIES FLOW ───
                 if (chosen._type === 'tv') {
-                    const tvInfoRes = await axios.get('https://api.chamindu.site/api/v1/tv/chithrapata/info', {
+                    const tvInfoRes = await axios.get(CH_BASE + '/api/v1/tv/chithrapata/info', {
                         params: { url: chosen.url, api_key: API_KEY },
                         timeout: 120000
                     });
@@ -10414,7 +10485,7 @@ case 'chmovie': {
                             }, { quoted: epMek });
 
                             try {
-                                const epInfoRes = await axios.get('https://api.chamindu.site/api/v1/tv/chithrapata/episode', {
+                                const epInfoRes = await axios.get(CH_BASE + '/api/v1/tv/chithrapata/episode', {
                                     params: { url: selectedEp.url, api_key: API_KEY },
                                     timeout: 120000
                                 });
@@ -11011,8 +11082,8 @@ case 'sinhalatopsearch': {
     }
 
     const sinhalaTopQuery = args.join(' ');
-    const API_BASE = 'https://api.chamindu.site/api/v1/cartoons/sinhalatop';
-    const API_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+    const API_BASE = CH_BASE + '/api/v1/cartoons/sinhalatop';
+    const API_KEY = CH_KEY;
 
     let sinhalaTopSelectionListener = null;
     let sinhalaTopDownloadListener = null;
@@ -11305,9 +11376,9 @@ case 'cinetv': {
         text: `*❪ SEARCHING ❫*\n\n🔍 *Searching Movies...*\n⚡ _Please wait a moment._`
     });
 
-    const API_BASE = "https://api.chamindu.site";
-    const API_KEY = "chama_api_11230a80e5eed3c1b80bfcc5d1773ec9"; // ඔබේ API Key එක දාන්න
-    const DEFAULT_IMAGE = "https://api.chamindu.site/logo.png";
+    const API_BASE = CH_BASE;
+    const API_KEY = CH_KEY; // ඔබේ API Key එක දාන්න
+    const DEFAULT_IMAGE = CH_BASE + '/logo.png';
 
     try {
         const searchResponse = await axios.get(`${API_BASE}/api/v1/movie/cinesubz/search?q=${encodeURIComponent(cinesubQuery)}&api_key=${API_KEY}`);
@@ -11904,8 +11975,8 @@ case 'mslk': {
     }
 
     const movieQuery = args.join(' ').trim();
-    const API_BASE = 'https://api.chamindu.site/api/v1/movies/moviesublkcom';
-    const API_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+    const API_BASE = CH_BASE + '/api/v1/movies/moviesublkcom';
+    const API_KEY = CH_KEY;
 
     const TIMEOUT_API = 120000;
     const TIMEOUT_INFO = 120000;
@@ -12192,8 +12263,8 @@ case 'rp': {
     }
 
     const rpQuery = args.join(' ');
-    const RP_API_BASE = 'https://api.chamindu.site/api/adult/rexporn';
-    const RP_API_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+    const RP_API_BASE = CH_BASE + '/api/adult/rexporn';
+    const RP_API_KEY = CH_KEY;
 
     let rpSelectionListener = null;
     let rpQualityListener = null;
@@ -12406,9 +12477,9 @@ case 'm': {
         text: `*❪ SEARCHING ❫*\n\n🔍 *Searching across all sources...*\n⚡ _Please wait a moment._`
     });
 
-    const API_BASE = "https://api.chamindu.site";
-    const API_KEY = "chama_api_11230a80e5eed3c1b80bfcc5d1773ec9"; // ඔබේ API Key එක දාන්න
-    const DEFAULT_IMAGE = "https://api.chamindu.site/logo.png";
+    const API_BASE = CH_BASE;
+    const API_KEY = CH_KEY; // ඔබේ API Key එක දාන්න
+    const DEFAULT_IMAGE = CH_BASE + '/logo.png';
 
     try {
         const sites = ["cinesubz", "sinhalasub", "thenkiri", "moviesublk", "baiscope", "cineru"];
@@ -13294,8 +13365,8 @@ case 'mod': {
     const chatJid = msg.key.remoteJid;
     const DEFAULT_FOOTER = `\n\n> 📱 𝗦𝗛𝗔??𝗚𝗬 𝗫𝗠𝗗 📱\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 👑 𝗦𝗛𝗔𝗚𝗚𝗬 𝗧𝗘𝗖𝗛`;
 
-    const API_BASE = "https://api.chamindu.site";
-    const API_KEY = "chama_api_11230a80e5eed3c1b80bfcc5d1773ec9";
+    const API_BASE = CH_BASE;
+    const API_KEY = CH_KEY;
     const DEFAULT_IMAGE = "https://liteapks.com/wp-content/uploads/2022/04/spotify-music-and-podcasts-150x150.png";
     const TEMP_DIR = './tmp_apk';
 
@@ -13756,8 +13827,8 @@ case 'cartoonlk': {
     }
 
     const cartoonQuery = args.join(' ');
-    const API_BASE = 'https://api.chamindu.site/api/v1/cartoons/sinhalacartoons';
-    const API_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+    const API_BASE = CH_BASE + '/api/v1/cartoons/sinhalacartoons';
+    const API_KEY = CH_KEY;
 
     let cartoonSelectionListener = null;
     let cartoonEpisodeListener = null;
@@ -14226,6 +14297,14 @@ case 'groupinfo': {
 // ==========================================
 // 🆕 OWNER CONTACT (.owner)
 // ==========================================
+case 'apicheck': {
+    if (!(config.OWNER_NUMBERS || []).includes(senderNumber)) break;
+    await socket.sendMessage(sender, { text: '🔎 Checking movie APIs... (30s k witharai)' }, { quoted: msg });
+    const apiRes = await runApiChecks();
+    await socket.sendMessage(sender, { text: `*API STATUS* (${apiRes.filter(r => r.ok).length}/${apiRes.length} working)\n\n` + apiRes.map(r => r.text).join('\n') }, { quoted: msg });
+    break;
+}
+
 case 'nt': {
     // 📢 Master owner witharai: image + text (ho text witharak) bot connected hama user kenektama yawanawa
     if (!(config.OWNER_NUMBERS || []).includes(senderNumber)) {
