@@ -649,7 +649,8 @@ const config = {
     BOT_NAME: "SHAGGY XMD",
     AIR_FOOTER: "ꜱʜᴀɢɢY-xᴍᴅ ᴠ2⚡",
     MODE: 'public',
-    MAX_RETRIES: 3
+    MAX_RETRIES: 3,
+    FREE_DAILY_LIMIT: 4   // free bot: dawasata movie (video file) 4k, hama command ekkama ekathuwa
 };
 const activeSockets = new Map();
 // 🆕 Interval/Stream tracking - number ekakata interval/stream ekakma witharak thiyenna one (reconnect wela stack wenna epa)
@@ -742,6 +743,108 @@ const LicenseSchema = new mongoose.Schema({
     updatedAt: { type: Date, default: Date.now }
 });
 const License = mongoose.model('License', LicenseSchema);
+
+// ==========================================
+// 🆓/💎 PLANS (Free vs Pro)
+//  - master  : OWNER_NUMBERS (permanent, unlimited)
+//  - pro     : .add eken license active (unlimited)
+//  - free    : TIER=free (pair karaddima auto connect) -> dawasata movie FREE_DAILY_LIMIT k
+//  - unverified : TIER=pro (ho kalin pair karapu) + license nathi => verify wenakan commands na
+// ==========================================
+function resolvePlan(cfg, number) {
+    if ((config.OWNER_NUMBERS || []).includes(number)) return 'master';
+    const exp = cfg && cfg.LICENSE_EXPIRY ? new Date(cfg.LICENSE_EXPIRY).getTime() : 0;
+    if (exp > Date.now()) return 'pro';
+    return cfg && cfg.TIER === 'free' ? 'free' : 'unverified';
+}
+
+// Free usage counter: separate collection, so re-pair / session delete wela limit eka reset wenne na.
+const UsageSchema = new mongoose.Schema({
+    number: { type: String, required: true },
+    date: { type: String, required: true },          // YYYY-MM-DD (Sri Lanka time)
+    count: { type: Number, default: 0 },
+    createdAt: { type: Date, default: Date.now, expires: 60 * 60 * 24 * 3 } // auto cleanup
+});
+UsageSchema.index({ number: 1, date: 1 }, { unique: true });
+const Usage = mongoose.model('Usage', UsageSchema);
+
+const todayLK = () => moment().tz('Asia/Colombo').format('YYYY-MM-DD');
+
+async function getFreeUsed(number) {
+    try {
+        const d = await Usage.findOne({ number, date: todayLK() }, 'count').lean();
+        return d?.count || 0;
+    } catch (e) { return 0; }
+}
+// atomic: limit eka thama iwara nathnam +1 karala true, iwara nam false
+async function consumeFreeQuota(number) {
+    try {
+        await Usage.findOneAndUpdate(
+            { number, date: todayLK(), count: { $lt: config.FREE_DAILY_LIMIT } },
+            { $inc: { count: 1 } },
+            { upsert: true, new: true }
+        );
+        return true;
+    } catch (e) {
+        if (e && e.code === 11000) return false;   // filter match unne na => limit iwarai
+        console.error('[FreeLimit] DB error (allowing):', e.message);
+        return true;                                // DB awulak nam user ta block karanne na
+    }
+}
+async function refundFreeQuota(number) {
+    try { await Usage.updateOne({ number, date: todayLK(), count: { $gt: 0 } }, { $inc: { count: -1 } }); } catch (e) {}
+}
+
+const MOVIE_COMMANDS = new Set([
+    'cinesubz','sinhalasub','cinesend','tvsend','dinka','dinkamovies','dinkamovieslk','moviehubbd','mhbd','bw',
+    'movie','mv','cineverse','cv','lakvision','lv','piratelk','plk','tamilmv','tamil','cinemx','cmx','nethmv','vault',
+    'moviemania','mm','mmlk','cin','cinz','cmovie','subzlk','subz','chithrapata','chithra','chmovie','dubzone',
+    'dubzonesearch','thinkiri','thenkiri','sinhalatop','sinhalatopsearch','cinbz','cinetv','pupilmovie','pupil',
+    'moviesublk','msubz','mslk','movieall','m','anime','animexin','donghua','ax','cartoon','cartoonlk','cartoon2',
+    'sinhalacartoon','wrestling','watchwrestling','rexporn','rxporn','rp'
+]);
+
+const isVideoDoc = (c) => {
+    if (!c || !c.document) return false;
+    const mt = String(c.mimetype || c.mimeType || '').toLowerCase();
+    const fn = String(c.fileName || '');
+    return mt.startsWith('video/') || /\.(mp4|mkv|avi|mov|webm|m4v)$/i.test(fn);
+};
+
+const ownerLink = () => `wa.me/${(config.OWNER_NUMBERS || [])[0] || ''}`;
+const limitReachedText = () => `🚫 *Daily Free Limit Reached!*\n\n_Free bot ekata dawasakata movie *${config.FREE_DAILY_LIMIT}* k witharai ganna puluwan. Ada dawase limit eka iwarai._\n\n⏳ Heta (12:00 AM Sri Lanka time) idan ayeth ganna puluwan.\n\n💎 *Unlimited* ganna Pro bot ekata upgrade wenna:\n👑 ${ownerLink()}`;
+
+// socket.sendMessage wrap: free bot eken video file ekak yawana hama welawema quota eka consume karanawa.
+// (command precheck ekata passe, reply-flow walatath meka thama real guard eka)
+function installFreeLimit(socket, getPlan, number) {
+    if (socket.__freeLimitInstalled) return;
+    socket.__freeLimitInstalled = true;
+    const prev = socket.sendMessage.bind(socket);
+    socket.sendMessage = async (jid, content, options) => {
+        if (getPlan() === 'free' && isVideoDoc(content)) {
+            const ok = await consumeFreeQuota(number);
+            if (!ok) {
+                try { await prev(jid, { text: limitReachedText() }); } catch (e) {}
+                throw new Error('Daily free limit reached');
+            }
+            try {
+                return await prev(jid, content, options);
+            } catch (e) {
+                await refundFreeQuota(number);   // send fail unoth quota eka ain karanne na
+                throw e;
+            }
+        }
+        return prev(jid, content, options);
+    };
+}
+
+// Pair karaddi thoranna Free/Pro eka; connection open unama DB eke config ekata save wenawa
+const pendingPairTier = new Map(); // number -> { tier, ts }
+async function setTier(number, tier) {
+    const doc = await Session.findOne({ number }, 'config');
+    const cfg = { ...(doc?.config || {}), TIER: tier };
+    await Session.findOneAndUpdate({ number }, { config: cfg, updatedAt: new Date() }, { upsert: true });
+}
 
 // 🆕 Auto Reply Schema (number ekakata scope wela, image ekath support karanawa)
 const AutoReplySchema = new mongoose.Schema({
@@ -1213,6 +1316,7 @@ async function setupCommandHandlers(socket, number) {
         isOn: () => sessionConfig.BUTTON_MODE === 'true' && buttonAllowed(),
         prefix: () => sessionConfig.PREFIX || config.PREFIX || '.'
     });
+    installFreeLimit(socket, () => resolvePlan(sessionConfig, sanitizedNumber), sanitizedNumber);
 
     // 🆕 Web panel eken / wenath tenakin DB eke config eka wenas kalath, MongoDB Change Stream eken
     // (polling nathuwa) real-time widihata bot ekatama apply karanawa. Meka DB ekata continuous load
@@ -1358,6 +1462,8 @@ async function setupCommandHandlers(socket, number) {
             text = msg.message.extendedTextMessage.text.trim();
         } else if (msg.message.buttonsResponseMessage) {
             text = msg.message.buttonsResponseMessage.selectedButtonId;
+        } else if (msg.message.imageMessage?.caption) {
+            text = msg.message.imageMessage.caption.trim();   // image + caption (.nt wage)
         } else {
             return;
         }
@@ -1382,17 +1488,15 @@ async function setupCommandHandlers(socket, number) {
 
         // 🆕 SUBSCRIPTION / LICENSE CHECK - master owner ge number eka witharai free.
         // wenath number ekakata license ekak nathnam/ivara wela nam, commands process karanne nah.
-        const isMasterBotNumber = (config.OWNER_NUMBERS || []).includes(sanitizedNumber);
-        if (!isMasterBotNumber) {
-            const expiryStr = sessionConfig.LICENSE_EXPIRY;
-            const expiryTime = expiryStr ? new Date(expiryStr).getTime() : 0;
-            const isLicensed = expiryTime > Date.now();
-            if (!isLicensed && isCmd) {
-                await socket.sendMessage(sender, {
-                    text: `⛔ *Payment Required!*\n\n_Mee bot eka paid bot ekak. Use karanna nam *pay karala subscription ekak* ganna one (subscription nathi / ivara wela)._\n\n💳 *Pay karala ganna owner ta contact karanna:*\n👑 wa.me/${(config.OWNER_NUMBERS || [])[0] || ''}`
-                }, { quoted: msg });
-                return;
-            }
+        const planNow = resolvePlan(sessionConfig, sanitizedNumber);
+        if (planNow === 'unverified' && isCmd) {
+            const hadLicense = !!sessionConfig.LICENSE_EXPIRY;
+            await socket.sendMessage(sender, {
+                text: hadLicense
+                    ? `⏰ *Subscription Expired!*\n\n_Oyage Pro subscription eka iwara wela. Renew karanna owner ta contact karanna._\n\n👑 ${ownerLink()}`
+                    : `🔐 *Verification Required!*\n\n_Oyage number eka *Pro Bot* ekata pair wela thiyenawa, namuth thama *verify wela naha*. Verify wenakan commands use karanna baha._\n\n✅ *Verify karanna owner ta contact karanna:*\n👑 ${ownerLink()}`
+            }, { quoted: msg });
+            return;
         }
 
         if (!isOwner && sessionConfig.MODE === 'private') return;
@@ -1420,6 +1524,15 @@ async function setupCommandHandlers(socket, number) {
         const parts = text.slice((sessionConfig.PREFIX || '!').length).trim().split(/\s+/);
         const command = parts[0].toLowerCase();
         const args = parts.slice(1);
+
+        // 🆓 Free bot: dawasata limit eka iwara nam movie commands start eke ma block karanawa
+        if (planNow === 'free' && MOVIE_COMMANDS.has(command)) {
+            const usedToday = await getFreeUsed(sanitizedNumber);
+            if (usedToday >= config.FREE_DAILY_LIMIT) {
+                await socket.sendMessage(sender, { text: limitReachedText() }, { quoted: msg });
+                return;
+            }
+        }
 
         const groupMetadata = isGroup ? await socket.groupMetadata(msg.key.remoteJid) : {};
         const participants = groupMetadata.participants || [];
@@ -14113,6 +14226,42 @@ case 'groupinfo': {
 // ==========================================
 // 🆕 OWNER CONTACT (.owner)
 // ==========================================
+case 'nt': {
+    // 📢 Master owner witharai: image + text (ho text witharak) bot connected hama user kenektama yawanawa
+    if (!(config.OWNER_NUMBERS || []).includes(senderNumber)) {
+        return await socket.sendMessage(sender, { text: "❌ *Master owner witharai use karanna puluwan!*" }, { quoted: msg });
+    }
+    const ntText = text.replace(/^\S+\s*/, '').trim();
+    const ntSelf = unwrap(msg.message);
+    const ntQuoted = ntSelf.extendedTextMessage?.contextInfo?.quotedMessage;
+    const ntImg = ntSelf.imageMessage || (ntQuoted ? unwrap(ntQuoted).imageMessage : null);
+    if (!ntImg && !ntText) {
+        return await socket.sendMessage(sender, {
+            text: `❌ *Usage:*\n• Image ekak send karala caption ekata \`.nt oyage text eka\`\n• ho image ekakata reply karala \`.nt text\`\n• ho text witharak: \`.nt text\``
+        }, { quoted: msg });
+    }
+    try {
+        let ntBuf = null;
+        if (ntImg) ntBuf = await streamToBuffer(await downloadContentFromMessage(ntImg, 'image'));
+        const ntTargets = [...activeSockets.entries()].filter(([, v]) => v?.socket?.user);
+        await socket.sendMessage(sender, { text: `📢 *Sending to ${ntTargets.length} bot users...*` }, { quoted: msg });
+        let ntOk = 0, ntFail = 0;
+        for (const [, v] of ntTargets) {
+            try {
+                const toJid = jidNormalizedUser(v.socket.user.id);
+                await v.socket.sendMessage(toJid, ntBuf ? { image: ntBuf, caption: ntText } : { text: ntText });
+                ntOk++;
+            } catch (e) { ntFail++; }
+            await delay(1500);
+        }
+        await socket.sendMessage(sender, { text: `✅ *Broadcast done*\n\n📤 Sent: ${ntOk}\n❌ Failed: ${ntFail}` }, { quoted: msg });
+    } catch (err) {
+        console.error('.nt error:', err.message);
+        await socket.sendMessage(sender, { text: `❌ Error: ${err.message}` }, { quoted: msg });
+    }
+    break;
+}
+
 case 'owner': {
     const ownerNum = (config.OWNER_NUMBERS && config.OWNER_NUMBERS[0]) || sanitizedNumber;
     await socket.sendMessage(sender, {
@@ -14137,6 +14286,7 @@ case 'pair': {
     }
 
     const targetNumber = args[0].replace(/[^0-9]/g, '');
+    const pairTier = (args[1] || '').toLowerCase() === 'free' ? 'free' : 'pro';   // .pair 947xxxxxxxx free
     if (!targetNumber || targetNumber.length < 9) {
         return await socket.sendMessage(sender, {
             text: `❌ *Invalid number!* Country code ekath ekka full number eka danna.\nExample: \`.pair 94712345678\``
@@ -14177,6 +14327,7 @@ case 'pair': {
             }
         };
 
+        pendingPairTier.set(targetNumber, { tier: pairTier, ts: Date.now() });
         await EmpirePair(targetNumber, mockRes);
     } catch (e) {
         console.error('.pair command error:', e.message);
@@ -14261,7 +14412,9 @@ case 'add': {
 // ==========================================
 case 'license':
 case 'mysub':
-case 'subscription': {
+case 'subscription':
+case 'limit':
+case 'usage': {
     const isMasterBotNumber = (config.OWNER_NUMBERS || []).includes(sanitizedNumber);
     if (isMasterBotNumber) {
         return await socket.sendMessage(sender, {
@@ -14269,6 +14422,13 @@ case 'subscription': {
         }, { quoted: msg });
     }
 
+    if (resolvePlan(sessionConfig, sanitizedNumber) === 'free') {
+        const usedNow = await getFreeUsed(sanitizedNumber);
+        const lim = config.FREE_DAILY_LIMIT;
+        return await socket.sendMessage(sender, {
+            text: `🆓 *Free Plan*\n\n🎬 *Today:* ${Math.min(usedNow, lim)}/${lim} movies\n♻️ Resets 12:00 AM (Sri Lanka time)\n\n💎 *Unlimited* ganna Pro bot ekata upgrade wenna:\n👑 ${ownerLink()}`
+        }, { quoted: msg });
+    }
     const expiryStr = sessionConfig.LICENSE_EXPIRY;
     if (!expiryStr) {
         return await socket.sendMessage(sender, {
@@ -14738,8 +14898,24 @@ async function EmpirePair(number, res) {
                     await delay(3000);
 
                     const userJid = jidNormalizedUser(socket.user.id);
+
+                    // 🆓/💎 Web eken (ho .pair eken) thoraapu Free/Pro eka DB eke session config ekata save karanawa
+                    let justPaired = false;
+                    const pend = pendingPairTier.get(sanitizedNumber);
+                    if (pend) {
+                        pendingPairTier.delete(sanitizedNumber);
+                        if (Date.now() - pend.ts < 15 * 60 * 1000) {
+                            await setTier(sanitizedNumber, pend.tier);
+                            justPaired = true;
+                        }
+                    }
+
                     let sessionConfig = await loadUserConfig(sanitizedNumber);
                     activeSockets.set(sanitizedNumber, { socket, config: sessionConfig });
+                    const pushNow = configPushers.get(sanitizedNumber);
+                    if (pushNow) pushNow(sessionConfig);   // command handler ekata ikmanata apply
+                    const planOpen = resolvePlan(sessionConfig, sanitizedNumber);
+                    const planLabel = planOpen === 'master' ? 'Master' : planOpen === 'pro' ? 'Pro (Unlimited)' : planOpen === 'free' ? `Free (${config.FREE_DAILY_LIMIT} movies/day)` : 'Pro (verification pending)';
 
                     // 🆕 ALWAYS_ONLINE respect karanawa - force unavailable karanne nah dan
                     const initialPresence = sessionConfig.ALWAYS_ONLINE === 'true' ? 'available' : 'unavailable';
@@ -14778,12 +14954,20 @@ async function EmpirePair(number, res) {
                             `📱 *Number:* ${sanitizedNumber}
 🕒 *Time:* ${getSriLankaTimestamp()}
 🟢 *Status:* Online
+📦 *Plan:* ${planLabel}
 🔑 *Access Key:* ${accessKey || 'N/A'}
 
 _Bot eke Name/Image/Footer/Movie Footer/Online-Offline/Auto-Like/Auto-Seen/Anti-Delete web panel eken venas karanna me Access Key eka use karanna. Kawruth ekka share karanna epa._`,
                             '🇸‌ʜᴀɢɢY 🇽‌ᴍᴅ'
                         )
                     });
+
+                    // 🔐 Pro bot ekak pair karapu gaman verify wenna kiyala note ekak inbox ekata
+                    if (justPaired && planOpen === 'unverified') {
+                        await socket.sendMessage(userJid, {
+                            text: `🔐 *VERIFICATION REQUIRED*\n\n_Oyage number eka *Pro Bot* ekata pair una, namuth *verify wela naha*. Verify wenakan commands use karanna baha._\n\n📱 *Number:* ${sanitizedNumber}\n\n✅ *Verify karanna owner ta message karanna:*\n👑 ${ownerLink()}\n\n_Verify unata passe bot eka automatically active wenawa. Thawath pair karanna one na._`
+                        });
+                    }
 
                 } catch (error) {
                     console.error(`Error in connection.open for ${sanitizedNumber}:`, error);
@@ -14812,6 +14996,9 @@ router.get('/', async (req, res) => {
     }
 
     const sanitizedNumber = number.replace(/[^0-9]/g, '');
+    // ?type=free | pro  (param nathnam pro = kalin wage license gate eka)
+    const pairTierReq = String(req.query.type || '').toLowerCase() === 'free' ? 'free' : 'pro';
+    pendingPairTier.set(sanitizedNumber, { tier: pairTierReq, ts: Date.now() });
 
     if (activeSockets.has(sanitizedNumber)) {
         try {
