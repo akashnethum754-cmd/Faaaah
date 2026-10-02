@@ -743,6 +743,115 @@ const LicenseSchema = new mongoose.Schema({
     updatedAt: { type: Date, default: Date.now }
 });
 // ==========================================
+// ⬇️ ROBUST DOWNLOADER (hama movie command ekakatama common)
+//  - data enne nathnam (stall 90s) nawaththala retry, Range walin resume
+//  - HTML/JSON page ekak awoth athule direct video link eka hoyala follow karanawa
+//  - 4xx (403/404) walata retry karanne na, network/5xx walata 3 parak
+//  - incomplete file / error page eka save wela "download una" kiyala yanne na
+// ==========================================
+const DL_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+async function readSmallBody(stream, max = 400000) {
+    const chunks = []; let n = 0;
+    for await (const c of stream) {
+        chunks.push(c); n += c.length;
+        if (n >= max) { stream.destroy(); break; }
+    }
+    return Buffer.concat(chunks).toString('utf8');
+}
+
+function extractDirectLink(body, base) {
+    const vid = /https?:\/\/[^\s"'<>\\)]+?\.(?:mp4|mkv|avi|mov|webm|m4v)(?:\?[^\s"'<>\\)]*)?/i;
+    try {
+        const j = JSON.parse(body);
+        const stack = [j];
+        while (stack.length) {
+            const o = stack.pop();
+            if (o && typeof o === 'object') {
+                for (const [k, v] of Object.entries(o)) {
+                    if (typeof v === 'string' && /^https?:\/\//i.test(v) && (/direct|download|file|video|stream|url|link/i.test(k) || vid.test(v))) return v;
+                    if (v && typeof v === 'object') stack.push(v);
+                }
+            }
+        }
+    } catch (_) {}
+    const meta = body.match(/http-equiv=["']refresh["'][^>]*url=([^"'>\s]+)/i);
+    if (meta) { try { return new URL(meta[1].replace(/&amp;/g, '&'), base).toString(); } catch (_) {} }
+    const m = body.replace(/\\\//g, '/').replace(/&amp;/g, '&').match(vid);
+    return m ? m[0] : null;
+}
+
+async function robustDownload(url, dest, referer = '') {
+    url = String(url || '').trim().replace(/^Https/i, 'https');
+    if (!/^https?:\/\//i.test(url)) throw new Error('Download link eka waradi');
+    await fs.ensureDir(path.dirname(dest));
+    await fs.remove(dest).catch(() => {});
+    const STALL_MS = 90000, ATTEMPTS = 3;
+    let lastErr, hops = 0;
+
+    for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+        let have = 0;
+        try { have = (await fs.stat(dest)).size; } catch (_) {}
+        const headers = { 'User-Agent': DL_UA, 'Accept': '*/*', 'Accept-Encoding': 'identity' };
+        if (referer) headers.Referer = referer;
+        if (have > 0) headers.Range = `bytes=${have}-`;
+        const ctrl = new AbortController();
+        try {
+            const res = await axios({
+                url, method: 'GET', responseType: 'stream', timeout: 60000, signal: ctrl.signal,
+                maxRedirects: 10, maxContentLength: Infinity, maxBodyLength: Infinity, headers,
+                validateStatus: (st) => (st >= 200 && st < 300) || st === 416, __retry: 2
+            });
+            if (res.status === 416) {            // Range eka iwarai => file eka kalinma iwara wela
+                res.data.destroy();
+                if (have > 0) return;
+                throw new Error('Server error 416');
+            }
+            const ct = String(res.headers['content-type'] || '').toLowerCase();
+            if (ct.includes('text/html') || ct.includes('application/json')) {
+                const body = await readSmallBody(res.data);
+                const next = hops < 2 ? extractDirectLink(body, url) : null;
+                if (next && next !== url) { hops++; url = next; attempt--; continue; }
+                const e = new Error('Link eka file ekak nemei (web page ekak). Link eka expire wela ho block wela.');
+                e.fatal = true; throw e;
+            }
+            const resume = have > 0 && res.status === 206;
+            const total = (parseInt(res.headers['content-length'] || '0', 10) || 0) + (resume ? have : 0);
+            const writer = fs.createWriteStream(dest, { flags: resume ? 'a' : 'w' });
+            await new Promise((resolve, reject) => {
+                let stall;
+                const fail = (e) => { clearTimeout(stall); reject(e); };
+                const arm = () => { clearTimeout(stall); stall = setTimeout(() => { const e = new Error('Download stalled (data enne na)'); ctrl.abort(); res.data.destroy(); fail(e); }, STALL_MS); };
+                arm();
+                res.data.on('data', arm);
+                res.data.on('error', fail);
+                writer.on('error', fail);
+                writer.on('finish', () => { clearTimeout(stall); resolve(); });
+                res.data.pipe(writer);
+            });
+            const size = (await fs.stat(dest)).size;
+            if (total && size < total) throw new Error(`Incomplete download (${size}/${total} bytes)`);
+            if (size < 2 * 1024 * 1024) {        // podi file ekak => error page ekak da balanawa
+                const fh = await fs.open(dest, 'r'); const buf = Buffer.alloc(300);
+                await fs.read(fh, buf, 0, 300, 0); await fs.close(fh);
+                if (/^\s*<(!doctype|html|\?xml)/i.test(buf.toString('utf8'))) {
+                    const e = new Error('Download una file eka error page ekak (video ekak nemei)'); e.fatal = true; throw e;
+                }
+            }
+            return;
+        } catch (e) {
+            lastErr = e;
+            const st = e.response?.status;
+            if (e.fatal || e.code === 'ENOSPC' || (st && st >= 400 && st < 500 && ![408, 429].includes(st))) break;
+            if (attempt < ATTEMPTS) await delay(2500 * attempt);
+        }
+    }
+    await fs.remove(dest).catch(() => {});
+    if (lastErr?.code === 'ENOSPC') throw new Error('Server eke disk eka full (ENOSPC)');
+    throw lastErr || new Error('Download failed');
+}
+
+// ==========================================
 // 🌐 Third-party movie APIs: central config + auto retry
 //   .env eke  CHAMINDU_API_KEY=...  /  CHAMINDU_API_BASE=...  dala key/url eka wenas karanna puluwan
 // ==========================================
@@ -5070,44 +5179,7 @@ case 'dinkamovieslk': {
     };
 
     // ⭐ Direct download (non-GDrive)
-    const downloadDirect = async (url, dest) => {
-        await fs.ensureDir(path.dirname(dest));
-        const writer = fs.createWriteStream(dest);
-        const res = await axios({
-            url,
-            method: 'GET',
-            responseType: 'stream',
-            timeout: 0,
-            maxRedirects: 10,
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': '*/*'
-            }
-        });
-
-        const ct = (res.headers['content-type'] || '').toLowerCase();
-        if (ct.includes('text/html')) {
-            res.data.destroy();
-            throw new Error('HTML response (not a file)');
-        }
-
-        res.data.pipe(writer);
-        await new Promise((resolve, reject) => {
-            writer.on('finish', resolve);
-            writer.on('error', reject);
-            res.data.on('error', reject);
-        });
-
-        const stats = await fs.stat(dest);
-        if (stats.size < 1024 * 100) {
-            await fs.remove(dest).catch(() => {});
-            throw new Error(`File too small: ${(stats.size / 1024).toFixed(1)} KB`);
-        }
-
-        return { success: true, size: stats.size };
-    };
+    const downloadDirect = async (url, dest) => { await robustDownload(url, dest, ''); return fs.stat(dest); };
 
     // ⭐ Smart downloader
     const downloadSmart = async (url, dest) => {
@@ -5448,48 +5520,9 @@ case 'bw': {
 
     // File එක temp folder එකට download කරනවා (streaming)
     const downloadFileToTemp = async (url, referer = 'https://moviehubbd.net/') => {
-        const tmpPath = path.join(
-            os.tmpdir(),
-            `mhbd_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`
-        );
-
-        const writer = fs.createWriteStream(tmpPath);
-        const response = await axios({
-            method: 'get',
-            url: url,
-            responseType: 'stream',
-            timeout: REQUEST_TIMEOUT,
-            maxRedirects: 10,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': referer,
-                'Accept': '*/*',
-                'Range': 'bytes=0-'
-            }
-        });
-
-        const ct = response.headers['content-type'] || '';
-        if (ct.includes('text/html')) {
-            writer.close();
-            try { fs.unlinkSync(tmpPath); } catch (e) {}
-            throw new Error('HTML page එකක් ලැබුණා - real MP4 නෙවෙයි');
-        }
-
-        return new Promise((resolve, reject) => {
-            response.data.pipe(writer);
-            writer.on('finish', () => {
-                const stats = fs.statSync(tmpPath);
-                resolve({ path: tmpPath, size: stats.size });
-            });
-            writer.on('error', (err) => {
-                try { fs.unlinkSync(tmpPath); } catch (e) {}
-                reject(err);
-            });
-            response.data.on('error', (err) => {
-                try { fs.unlinkSync(tmpPath); } catch (e) {}
-                reject(err);
-            });
-        });
+        const tmpPath = path.join(os.tmpdir(), `mhbd_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`);
+        await robustDownload(url, tmpPath, referer);
+        return { path: tmpPath, size: (await fs.stat(tmpPath)).size };
     };
 
     // Session management
@@ -5726,7 +5759,7 @@ case 'bw': {
 
                         // STEP 3: Document MP4 විදිහට යවන්න
                         await socket.sendMessage(sender, {
-                            document: fs.readFileSync(tmpPath),
+                            document: { url: tmpPath },   // stream (readFileSync eken RAM full wenawa)
                             mimetype: 'video/mp4',
                             fileName: fileName,
                             caption: `✅ *DOWNLOAD COMPLETE*\n\n` +
@@ -6142,26 +6175,7 @@ case 'lv': {
         return 0;
     };
 
-    const downloadToServer = async (url, dest) => {
-        await fs.ensureDir(path.dirname(dest));
-        const writer = fs.createWriteStream(dest);
-        const res = await axios({
-            url, method: 'GET', responseType: 'stream',
-            timeout: 0, maxRedirects: 5,
-            maxContentLength: Infinity, maxBodyLength: Infinity,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'https://lakvisiontv.lk/',
-                'Accept': '*/*'
-            }
-        });
-        res.data.pipe(writer);
-        return new Promise((resolve, reject) => {
-            writer.on('finish', resolve);
-            writer.on('error', reject);
-            res.data.on('error', reject);
-        });
-    };
+    const downloadToServer = async (url, dest) => { await robustDownload(url, dest, 'https://lakvisiontv.lk/'); return fs.stat(dest); };
 
     await socket.sendMessage(sender, {
         text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚 ❫*\n\n🔍 *Searching LakvisionTV for:* _${query}_\n⚡ _Please wait..._`
@@ -7025,30 +7039,7 @@ case 'ytmp3': {
     const API_KEY = CH_KEY;
 
     // ⭐ Server download
-    const downloadToServer = async (url, dest) => {
-        await fs.ensureDir(path.dirname(dest));
-        const writer = fs.createWriteStream(dest);
-        const res = await axios({
-            url,
-            method: 'GET',
-            responseType: 'stream',
-            timeout: 0,
-            maxRedirects: 5,
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'https://www.youtube.com/',
-                'Accept': '*/*'
-            }
-        });
-        res.data.pipe(writer);
-        return new Promise((resolve, reject) => {
-            writer.on('finish', resolve);
-            writer.on('error', reject);
-            res.data.on('error', reject);
-        });
-    };
+    const downloadToServer = async (url, dest) => { await robustDownload(url, dest, 'https://www.youtube.com/'); return fs.stat(dest); };
 
     await socket.sendMessage(sender, {
         text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗖𝗢𝗡𝗩𝗘𝗥𝗧𝗜𝗡𝗚 ❫*\n\n⚡ *Fetching YouTube ${dlType.toUpperCase()}...*\n⏳ _Please wait a moment..._`
@@ -7193,30 +7184,7 @@ case 'ax': {
     };
 
     // ⭐ Server download
-    const downloadToServer = async (url, dest) => {
-        await fs.ensureDir(path.dirname(dest));
-        const writer = fs.createWriteStream(dest);
-        const res = await axios({
-            url,
-            method: 'GET',
-            responseType: 'stream',
-            timeout: 0,
-            maxRedirects: 5,
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'https://animexin.vip/',
-                'Accept': '*/*'
-            }
-        });
-        res.data.pipe(writer);
-        return new Promise((resolve, reject) => {
-            writer.on('finish', resolve);
-            writer.on('error', reject);
-            res.data.on('error', reject);
-        });
-    };
+    const downloadToServer = async (url, dest) => { await robustDownload(url, dest, 'https://animexin.vip/'); return fs.stat(dest); };
 
     await socket.sendMessage(sender, {
         text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚 ❫*\n\n🔍 *Searching Animexin for:* _${query}_\n⚡ _Please wait..._`
@@ -7543,30 +7511,7 @@ case 'cmovie': {
     };
 
     // ⭐ Server download
-    const downloadToServer = async (url, dest) => {
-        await fs.ensureDir(path.dirname(dest));
-        const writer = fs.createWriteStream(dest);
-        const res = await axios({
-            url,
-            method: 'GET',
-            responseType: 'stream',
-            timeout: 0,
-            maxRedirects: 5,
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'https://cinesubz.co/',
-                'Accept': '*/*'
-            }
-        });
-        res.data.pipe(writer);
-        return new Promise((resolve, reject) => {
-            writer.on('finish', resolve);
-            writer.on('error', reject);
-            res.data.on('error', reject);
-        });
-    };
+    const downloadToServer = async (url, dest) => { await robustDownload(url, dest, 'https://cinesubz.co/'); return fs.stat(dest); };
 
     await socket.sendMessage(sender, {
         text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚 ❫*\n\n🔍 *Searching CineSubz for:* _${cinesubQuery}_\n⚡ _Please wait..._`
@@ -7958,30 +7903,7 @@ case 'watchwrestling': {
     };
 
     // ⭐ Download to server
-    const downloadToServer = async (url, dest) => {
-        await fs.ensureDir(path.dirname(dest));
-        const writer = fs.createWriteStream(dest);
-        const res = await axios({
-            url,
-            method: 'GET',
-            responseType: 'stream',
-            timeout: 0,
-            maxRedirects: 5,
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'https://watchwrestling.ws/',
-                'Accept': '*/*'
-            }
-        });
-        res.data.pipe(writer);
-        return new Promise((resolve, reject) => {
-            writer.on('finish', resolve);
-            writer.on('error', reject);
-            res.data.on('error', reject);
-        });
-    };
+    const downloadToServer = async (url, dest) => { await robustDownload(url, dest, 'https://watchwrestling.ws/'); return fs.stat(dest); };
 
     try {
         await socket.sendMessage(chatJid, { text: '🔍 *Searching shows on WatchWrestling...*' }, { quoted: msg });
@@ -8237,30 +8159,7 @@ case 'subz': {
     };
 
     // ⭐ Download to server
-    const downloadToServer = async (url, dest) => {
-        await fs.ensureDir(path.dirname(dest));
-        const writer = fs.createWriteStream(dest);
-        const res = await axios({
-            url,
-            method: 'GET',
-            responseType: 'stream',
-            timeout: 0,
-            maxRedirects: 5,
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'https://subzlk.com/',
-                'Accept': '*/*'
-            }
-        });
-        res.data.pipe(writer);
-        return new Promise((resolve, reject) => {
-            writer.on('finish', resolve);
-            writer.on('error', reject);
-            res.data.on('error', reject);
-        });
-    };
+    const downloadToServer = async (url, dest) => { await robustDownload(url, dest, 'https://subzlk.com/'); return fs.stat(dest); };
 
     try {
         await socket.sendMessage(chatJid, { text: '🔍 *Searching movies on SubzLK...*' }, { quoted: msg });
@@ -8527,30 +8426,7 @@ case 'tamil': {
     };
 
     // ⭐ File download to server
-    const downloadToServer = async (url, dest) => {
-        await fs.ensureDir(path.dirname(dest));
-        const writer = fs.createWriteStream(dest);
-        const res = await axios({
-            url,
-            method: 'GET',
-            responseType: 'stream',
-            timeout: 0,
-            maxRedirects: 5,
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'https://www.1tamilmv.meme/',
-                'Accept': '*/*'
-            }
-        });
-        res.data.pipe(writer);
-        return new Promise((resolve, reject) => {
-            writer.on('finish', resolve);
-            writer.on('error', reject);
-            res.data.on('error', reject);
-        });
-    };
+    const downloadToServer = async (url, dest) => { await robustDownload(url, dest, 'https://www.1tamilmv.meme/'); return fs.stat(dest); };
 
     try {
         await socket.sendMessage(sender, { text: '🔍 Searching on 1TamilMV...' }, { quoted: msg });
@@ -8818,30 +8694,7 @@ case 'cmx': {
     };
 
     // ⭐ Download to server
-    const downloadToServer = async (url, dest) => {
-        await fs.ensureDir(path.dirname(dest));
-        const writer = fs.createWriteStream(dest);
-        const res = await axios({
-            url,
-            method: 'GET',
-            responseType: 'stream',
-            timeout: 0,
-            maxRedirects: 5,
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'https://cinemx.lk/',
-                'Accept': '*/*'
-            }
-        });
-        res.data.pipe(writer);
-        return new Promise((resolve, reject) => {
-            writer.on('finish', resolve);
-            writer.on('error', reject);
-            res.data.on('error', reject);
-        });
-    };
+    const downloadToServer = async (url, dest) => { await robustDownload(url, dest, 'https://cinemx.lk/'); return fs.stat(dest); };
 
     try {
         await socket.sendMessage(sender, { text: '🔍 Searching on CineMX...' }, { quoted: msg });
@@ -9134,38 +8987,7 @@ case 'vault': {
     };
 
     // ⭐ Server download helper
-    const downloadToServer = async (url, dest) => {
-        await fs.ensureDir(path.dirname(dest));
-        const writer = fs.createWriteStream(dest);
-        const res = await axios({
-            url,
-            method: 'GET',
-            responseType: 'stream',
-            timeout: 0,
-            maxRedirects: 10,
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': '*/*'
-            }
-        });
-
-        const ct = (res.headers['content-type'] || '').toLowerCase();
-        if (ct.includes('text/html')) {
-            res.data.destroy();
-            throw new Error('HTML response (not a file)');
-        }
-
-        res.data.pipe(writer);
-        await new Promise((resolve, reject) => {
-            writer.on('finish', resolve);
-            writer.on('error', reject);
-            res.data.on('error', reject);
-        });
-
-        return await fs.stat(dest);
-    };
+    const downloadToServer = async (url, dest) => { await robustDownload(url, dest, ''); return fs.stat(dest); };
 
     try {
         await socket.sendMessage(sender, {
@@ -9384,30 +9206,7 @@ case 'mmlk': {
     };
 
     // ⭐ Download to server
-    const downloadToServer = async (url, dest) => {
-        await fs.ensureDir(path.dirname(dest));
-        const writer = fs.createWriteStream(dest);
-        const res = await axios({
-            url,
-            method: 'GET',
-            responseType: 'stream',
-            timeout: 0,
-            maxRedirects: 5,
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'https://www.moviemanialk.com/',
-                'Accept': '*/*'
-            }
-        });
-        res.data.pipe(writer);
-        return new Promise((resolve, reject) => {
-            writer.on('finish', resolve);
-            writer.on('error', reject);
-            res.data.on('error', reject);
-        });
-    };
+    const downloadToServer = async (url, dest) => { await robustDownload(url, dest, 'https://www.moviemanialk.com/'); return fs.stat(dest); };
 
     try {
         await socket.sendMessage(sender, { text: '🔍 Searching on MovieManiaLK...' }, { quoted: msg });
@@ -11680,30 +11479,7 @@ case 'pupil': {
     };
 
     // ⭐ Server download
-    const downloadToServer = async (url, dest) => {
-        await fs.ensureDir(path.dirname(dest));
-        const writer = fs.createWriteStream(dest);
-        const res = await axios({
-            url,
-            method: 'GET',
-            responseType: 'stream',
-            timeout: 0,
-            maxRedirects: 5,
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'https://pupilmovie.com/',
-                'Accept': '*/*'
-            }
-        });
-        res.data.pipe(writer);
-        return new Promise((resolve, reject) => {
-            writer.on('finish', resolve);
-            writer.on('error', reject);
-            res.data.on('error', reject);
-        });
-    };
+    const downloadToServer = async (url, dest) => { await robustDownload(url, dest, 'https://pupilmovie.com/'); return fs.stat(dest); };
 
     try {
         await socket.sendMessage(sender, {
