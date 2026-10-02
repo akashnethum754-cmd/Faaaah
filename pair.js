@@ -774,22 +774,22 @@ axios.interceptors.response.use((r) => r, async (e) => {
 // 🔎 .apicheck : movie APIs hama ekakatama search ekak gahala ✅/❌ report ekak (master number witharai)
 async function runApiChecks() {
     const Q = 'avatar';
-    const ch = (name, p) => ({ name, url: `${CH_BASE}${p}`, params: { q: Q, api_key: CH_KEY } });
+    const ch = (name, p, q = Q) => ({ name, url: `${CH_BASE}${p}`, params: { q, api_key: CH_KEY } });
     const probes = [
         { name: 'cinesubz (laksidu)', url: 'https://apis.laksidu.site/cinesubz/search', params: { query: Q, api_key: 'lakiyaofc2' } },
         { name: 'sinhalasub (zara)', url: `${config.API_MAIN_URL}/sinhalasub/search`, params: { query: Q, api_key: config.API_KEY } },
         ch('cinesubz (chamindu)', '/api/v1/movie/cinesubz/search'), ch('dinkamovies', '/api/v1/movie/dinkamovies/search'),
         ch('moviehubbd', '/api/v1/movies/moviehubbd/search'), ch('cineverse (.movie)', '/api/v1/movies/cineverselk/search'),
-        ch('lakvision', '/api/v1/movie/lakvision/search'), ch('piratelk', '/api/v1/movie/piratelk/search'),
+        ch('lakvision', '/api/v1/movie/lakvision/search', 'love'), ch('piratelk', '/api/v1/movie/piratelk/search', 'man'),
         ch('subzlk', '/api/v1/movies/subzlk/search'), ch('tamilmv', '/api/v1/movie/tamilmv/search'),
-        ch('cinemx', '/api/v1/movies/cinemx/search'), ch('moviemania', '/api/v1/movies/moviemanialk/search'),
-        ch('moviesublk', '/api/v1/movies/moviesublkcom/search'), ch('chithrapata', '/api/v1/chithrapata/search'),
+        ch('cinemx', '/api/v1/movies/cinemx/search'), ch('moviemania', '/api/v1/movies/moviemanialk/search', 'the'),
+        ch('moviesublk', '/api/v1/movies/moviesublkcom/search'), ch('chithrapata', '/api/v1/chithrapata/search', 'love'),
         ch('sinhalatop', '/api/v1/cartoons/sinhalatop/search'), ch('cartoons', '/api/v1/movies/cartoons/search'),
         ch('sinhalacartoons', '/api/v1/cartoons/sinhalacartoons/search'), ch('animexin', '/api/v1/anime/animexin/search'),
-        ch('watchwrestling', '/api/v1/wrestling/watchwrestling/search'),
+        ch('watchwrestling', '/api/v1/wrestling/watchwrestling/search', 'wwe'),
         { name: 'dubzone (heroku)', url: 'https://api-siteh-22e22e4cb068.herokuapp.com/api/dubzone/search', params: { q: Q } },
         { name: 'thinkiri (heroku)', url: 'https://api-siteh-22e22e4cb068.herokuapp.com/tinkiri/search', params: { q: Q } },
-        { name: 'vault (lovable)', url: 'https://stream-vault-api.lovable.app/api/public/v1/search', params: { q: Q } }
+        { name: 'vault (lovable)', url: 'https://stream-vault-api.lovable.app/api/public/v1/search', params: { q: Q }, headers: { 'x-api-key': 'mvk_796aa89023bfa0a1bca326895f5c30495064a557c948674b' } }
     ];
     const shape = (d) => {
         if (d == null) return 'empty';
@@ -799,13 +799,33 @@ async function runApiChecks() {
         if (d.status === false || d.success === false) return `API error: ${String(d.message || d.error || '').slice(0, 60)}`;
         return `keys: ${Object.keys(d).slice(0, 4).join(',')}`;
     };
+    const pickArr = (d) => Array.isArray(d?.data) ? d.data : Array.isArray(d?.results) ? d.results : Array.isArray(d) ? d : null;
     const out = await Promise.all(probes.map(async (p) => {
         const t = Date.now();
         try {
-            const r = await axios.get(p.url, { params: p.params, timeout: 25000, validateStatus: () => true });
+            const r = await axios.get(p.url, { params: p.params, headers: p.headers, timeout: 25000, validateStatus: () => true });
             const info = shape(r.data);
             const ok = r.status === 200 && /results|keys/.test(info) && !/^0 results/.test(info);
-            return { ok, text: `${ok ? '✅' : '❌'} ${p.name} - HTTP ${r.status}, ${info} (${Date.now() - t}ms)` };
+            let text = `${ok ? '✅' : '❌'} ${p.name} - HTTP ${r.status}, ${info} (${Date.now() - t}ms)`;
+            let deepOk = ok;
+            // DEEP: search eke 1 weni result ekata infodl gahala download links tiyenawada balanawa
+            const arr = pickArr(r.data);
+            if (ok && arr?.length && p.url.endsWith('/search') && p.url.startsWith(CH_BASE) && !/tv|wrestling|chithrapata|cinesubz/.test(p.url.replace(CH_BASE, ''))) {
+                const first = arr[0] || {};
+                const link = first.link || first.url;
+                if (!link) { deepOk = false; text += `\n     ↳ ❌ result eke link/url field eka naha (keys: ${Object.keys(first).join(',')})`; }
+                else {
+                    try {
+                        const ir = await axios.get(p.url.replace(/\/search$/, '/infodl'), { params: { q: link, api_key: CH_KEY }, timeout: 60000, validateStatus: () => true });
+                        const dls = ir.data?.data?.downloads;
+                        const good = (dls || []).filter(d => String(d.direct_link || d.link || d.url || '').startsWith('http'));
+                        if (ir.status !== 200) { deepOk = false; text += `\n     ↳ ❌ infodl HTTP ${ir.status}: ${String(ir.data?.message || ir.data?.error || '').slice(0, 60)}`; }
+                        else if (!good.length) { deepOk = false; text += `\n     ↳ ❌ infodl OK, namuth download links 0 (data keys: ${Object.keys(ir.data?.data || ir.data || {}).slice(0, 6).join(',')})`; }
+                        else text += `\n     ↳ ✅ infodl OK, ${good.length} download links`;
+                    } catch (e) { deepOk = false; text += `\n     ↳ ❌ infodl ${e.code || e.message}`; }
+                }
+            }
+            return { ok: deepOk, text };
         } catch (e) {
             return { ok: false, text: `❌ ${p.name} - ${e.code || e.message} (${Date.now() - t}ms)` };
         }
