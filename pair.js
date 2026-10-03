@@ -15249,6 +15249,13 @@ _Bot eke Name/Image/Footer/Movie Footer/Online-Offline/Auto-Like/Auto-Seen/Anti-
 }
 
 // 🌐 Home page status (main.html)
+// Web page eka pair una da kiyala balanna (connected = socket eka login wela)
+router.get('/connected', (req, res) => {
+    const n = String(req.query.number || '').replace(/[^0-9]/g, '');
+    const e = activeSockets.get(n);
+    res.json({ connected: !!(e && e.socket && e.socket.user) });
+});
+
 router.get('/status', (req, res) => {
     res.set('Cache-Control', 'no-store');
     res.json({ online: true, bots: activeSockets.size, uptime: Math.floor(process.uptime()), version: 'v4' });
