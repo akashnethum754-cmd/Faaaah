@@ -12,6 +12,7 @@ import yts from 'yt-search';
 import { pipeline } from 'stream/promises';
 import splitFileModule from 'split-file';
 import crypto from 'node:crypto';
+import os from 'os';
 const { splitFile } = splitFileModule;
 dotenv.config();
 
@@ -650,6 +651,13 @@ const config = {
     AIR_FOOTER: "ꜱʜᴀɢɢY-xᴍᴅ ᴠ2⚡",
     MODE: 'public',
     MAX_RETRIES: 3,
+    ANTI_CALL: 'false',   // call awoth auto reject
+    ANTI_LINK: 'off',     // off | delete | kick (groups)
+    WELCOME: 'false',     // group welcome / goodbye
+    WELCOME_MSG: '',
+    AWAY: 'false',        // inbox auto-reply (busy message)
+    AWAY_MSG: '',
+    COOLDOWN: '2.5',      // seconds, command spam guard (0 = off)
     FREE_DAILY_LIMIT: 4   // free bot: dawasata movie (video file) 4k, hama command ekkama ekathuwa
 };
 const activeSockets = new Map();
@@ -740,6 +748,8 @@ const Session = mongoose.model('Session', SessionSchema);
 const LicenseSchema = new mongoose.Schema({
     number: { type: String, unique: true, required: true },
     expiry: { type: Date, required: true },
+    remindedFor: { type: Date },        // expiry reminder yawapu expiry date eka
+    expiredNotified: { type: Date },    // expired notice yawapu expiry date eka
     updatedAt: { type: Date, default: Date.now }
 });
 // ==========================================
@@ -781,7 +791,31 @@ function extractDirectLink(body, base) {
     return m ? m[0] : null;
 }
 
+let MAX_PARALLEL_DL = Math.max(1, parseInt(process.env.MAX_PARALLEL_DOWNLOADS || '3', 10));
+let MIN_FREE_DISK = (parseFloat(process.env.MIN_FREE_DISK_GB || '1.2')) * 1024 ** 3;
+const dlGate = { active: 0, queue: [] };
+const dlAcquire = () => new Promise((res) => { if (dlGate.active < MAX_PARALLEL_DL) { dlGate.active++; res(); } else dlGate.queue.push(res); });
+const dlRelease = () => { const next = dlGate.queue.shift(); if (next) next(); else dlGate.active--; };
+
+async function assertDiskSpace(dest) {
+    try {
+        const st = await fs.promises.statfs(path.dirname(path.resolve(dest)));
+        const free = st.bavail * st.bsize;
+        if (free < MIN_FREE_DISK) throw Object.assign(new Error(`Server eke disk space madi (${(free / 1024 ** 3).toFixed(2)} GB witharai ithuru)`), { fatal: true });
+    } catch (e) { if (e.fatal) throw e; /* statfs support nathnam skip */ }
+}
+
+// hama movie download ekakma meken yanawa: parallel limit + disk guard
 async function robustDownload(url, dest, referer = '') {
+    await dlAcquire();
+    try {
+        await fs.ensureDir(path.dirname(dest));
+        await assertDiskSpace(dest);
+        return await robustDownloadInner(url, dest, referer);
+    } finally { dlRelease(); }
+}
+
+async function robustDownloadInner(url, dest, referer = '') {
     url = String(url || '').trim().replace(/^Https/i, 'https');
     if (!/^https?:\/\//i.test(url)) throw new Error('Download link eka waradi');
     await fs.ensureDir(path.dirname(dest));
@@ -994,6 +1028,161 @@ async function consumeFreeQuota(number) {
 async function refundFreeQuota(number) {
     try { await Usage.updateOne({ number, date: todayLK(), count: { $gt: 0 } }, { $inc: { count: -1 } }); } catch (e) {}
 }
+
+
+// ==========================================
+// 🧰 BATCH 1: ban / maintenance / cooldown / stats / bot list / expiry reminders / temp cleanup
+// ==========================================
+const Ban = mongoose.model('Ban', new mongoose.Schema({
+    number: { type: String, required: true, unique: true },
+    reason: { type: String, default: '' },
+    createdAt: { type: Date, default: Date.now }
+}));
+const Setting = mongoose.model('Setting', new mongoose.Schema({
+    key: { type: String, required: true, unique: true },
+    value: { type: mongoose.Schema.Types.Mixed }
+}));
+
+const bannedSet = new Set();
+const runtimeState = { maintenance: false, maintenanceMsg: '' };
+async function reloadBanState() {
+    try {
+        const bans = await Ban.find({}, 'number').lean();
+        bannedSet.clear(); bans.forEach((b) => bannedSet.add(b.number));
+        const m = await Setting.findOne({ key: 'maintenance' }).lean();
+        runtimeState.maintenance = !!m?.value?.on;
+        runtimeState.maintenanceMsg = m?.value?.msg || '';
+        const gs = await Setting.findOne({ key: 'global' }).lean();
+        applyGlobalSettings(gs?.value);
+    } catch (e) { console.error('[BanState] reload failed:', e.message); }
+}
+setTimeout(reloadBanState, 8000);
+setInterval(reloadBanState, 5 * 60 * 1000);
+
+// Command cooldown (spam / double-tap walata) + notice throttle
+const CMD_COOLDOWN_MS = parseInt(process.env.CMD_COOLDOWN_MS || '2500', 10);
+const cmdLast = new Map();
+const noticeLast = new Map();
+function onCooldown(key, ms = CMD_COOLDOWN_MS) {
+    const now = Date.now();
+    if (now - (cmdLast.get(key) || 0) < ms) return true;
+    cmdLast.set(key, now);
+    if (cmdLast.size > 5000) for (const [k, t] of cmdLast) if (now - t > 60000) cmdLast.delete(k);
+    return false;
+}
+function shouldNotice(key, ms = 10 * 60 * 1000) {
+    const now = Date.now();
+    if (now - (noticeLast.get(key) || 0) < ms) return false;
+    noticeLast.set(key, now);
+    return true;
+}
+
+// Temp file cleanup: tmp_* folders + os tmpdir eke mhbd_* (crash wela ithuru una files)
+async function cleanTempFiles(maxAgeMs) {
+    const now = Date.now(); let removed = 0;
+    const sweep = async (dir, nameOk) => {
+        let names = [];
+        try { names = await fs.readdir(dir); } catch (_) { return; }
+        for (const f of names) {
+            if (nameOk && !nameOk(f)) continue;
+            const p = path.join(dir, f);
+            try {
+                const st = await fs.stat(p);
+                if (st.isFile() && now - st.mtimeMs > maxAgeMs) { await fs.remove(p); removed++; }
+            } catch (_) {}
+        }
+    };
+    let top = [];
+    try { top = await fs.readdir(process.cwd()); } catch (_) {}
+    for (const d of top) {
+        if (!/^tmp_/.test(d)) continue;
+        try { if ((await fs.stat(path.join(process.cwd(), d))).isDirectory()) await sweep(path.join(process.cwd(), d)); } catch (_) {}
+    }
+    await sweep(os.tmpdir(), (f) => /^mhbd_/.test(f));
+    if (removed) console.log(`[Cleanup] removed ${removed} stale temp file(s)`);
+    return removed;
+}
+setTimeout(() => cleanTempFiles(60 * 60 * 1000), 20000);
+setInterval(() => cleanTempFiles(3 * 60 * 60 * 1000), 30 * 60 * 1000);
+
+// Subscription expiry reminder (dawas 3k kalin) + expired notice (eka parak)
+async function licenseReminderJob() {
+    try {
+        const DAY = 86400000, now = new Date();
+        const same = (a, b) => a && b && new Date(a).getTime() === new Date(b).getTime();
+        const sendOwn = async (number, text) => {
+            const entry = activeSockets.get(number);
+            if (!entry?.socket?.user) return false;
+            await entry.socket.sendMessage(jidNormalizedUser(entry.socket.user.id), { text });
+            return true;
+        };
+        const soon = await License.find({ expiry: { $gt: now, $lte: new Date(now.getTime() + 3 * DAY) } }).lean();
+        for (const lic of soon) {
+            if (same(lic.remindedFor, lic.expiry)) continue;
+            const days = Math.max(1, Math.ceil((new Date(lic.expiry) - now) / DAY));
+            const ok = await sendOwn(lic.number, `⏰ *Subscription Reminder*\n\nOyage Pro subscription eka *dawas ${days}kin* iwara wenawa (${new Date(lic.expiry).toDateString()}).\n\nRenew karanna owner ta contact karanna:\n👑 ${ownerLink()}`).catch(() => false);
+            if (ok) await License.updateOne({ _id: lic._id }, { remindedFor: lic.expiry });
+        }
+        const gone = await License.find({ expiry: { $gt: new Date(now.getTime() - 7 * DAY), $lte: now } }).lean();
+        for (const lic of gone) {
+            if (same(lic.expiredNotified, lic.expiry)) continue;
+            const ok = await sendOwn(lic.number, `⛔ *Subscription Expired*\n\nOyage Pro subscription eka iwara una. Pro features nathi wenawa.\n\nRenew karanna:\n👑 ${ownerLink()}`).catch(() => false);
+            if (ok) await License.updateOne({ _id: lic._id }, { expiredNotified: lic.expiry });
+        }
+    } catch (e) { console.error('[LicenseReminder]', e.message); }
+}
+setTimeout(licenseReminderJob, 60000);
+setInterval(licenseReminderJob, 60 * 60 * 1000);
+
+
+// ==========================================
+// ⚙️ GLOBAL SETTINGS (master .set) + group metadata cache
+// ==========================================
+function releaseDlQueue() {
+    while (dlGate.queue.length && dlGate.active < MAX_PARALLEL_DL) { dlGate.active++; dlGate.queue.shift()(); }
+}
+function applyGlobalSettings(g) {
+    if (!g) return;
+    if (g.FREE_LIMIT) config.FREE_DAILY_LIMIT = g.FREE_LIMIT;
+    if (g.MAX_DL) { MAX_PARALLEL_DL = g.MAX_DL; releaseDlQueue(); }
+    if (g.MIN_DISK_GB !== undefined) MIN_FREE_DISK = g.MIN_DISK_GB * 1024 ** 3;
+}
+async function applyAndSaveGlobal(upd) {
+    const g = {};
+    if (upd.FREE_LIMIT !== undefined) g.FREE_LIMIT = upd.FREE_LIMIT;
+    if (upd.MAX_DL !== undefined) g.MAX_DL = upd.MAX_DL;
+    if (upd.MIN_DISK_GB !== undefined) g.MIN_DISK_GB = upd.MIN_DISK_GB;
+    if (Object.keys(g).length) {
+        applyGlobalSettings(g);
+        const cur = await Setting.findOne({ key: 'global' }).lean();
+        await Setting.findOneAndUpdate({ key: 'global' }, { value: { ...(cur?.value || {}), ...g } }, { upsert: true });
+    }
+    if (upd.MAINTENANCE !== undefined || upd.MAINTENANCE_MSG !== undefined) {
+        if (upd.MAINTENANCE !== undefined) runtimeState.maintenance = upd.MAINTENANCE;
+        if (upd.MAINTENANCE_MSG !== undefined) runtimeState.maintenanceMsg = upd.MAINTENANCE_MSG;
+        await Setting.findOneAndUpdate({ key: 'maintenance' }, { value: { on: runtimeState.maintenance, msg: runtimeState.maintenanceMsg } }, { upsert: true });
+    }
+}
+
+const gmCache = new Map();
+async function getGroupMetaCached(socket, jid, ttl = 60000) {
+    const c = gmCache.get(jid);
+    if (c && Date.now() - c.t < ttl) return c.data;
+    const data = await socket.groupMetadata(jid);
+    gmCache.set(jid, { t: Date.now(), data });
+    if (gmCache.size > 300) gmCache.delete(gmCache.keys().next().value);
+    return data;
+}
+// admin check (LID / phone jid dekama cover karanna)
+function groupAdminSet(gm) {
+    const set = new Set();
+    for (const p of gm?.participants || []) {
+        if (!p.admin) continue;
+        for (const id of [p.id, p.jid, p.phoneNumber, p.lid]) if (id) set.add(jidNormalizedUser(id));
+    }
+    return set;
+}
+const LINK_RE = /(https?:\/\/|www\.|chat\.whatsapp\.com\/|wa\.me\/)\S+/i;
 
 const MOVIE_COMMANDS = new Set([
     'cinesubz','sinhalasub','cinesend','tvsend','dinka','dinkamovies','dinkamovieslk','moviehubbd','mhbd','bw',
@@ -1563,6 +1752,41 @@ async function setupCommandHandlers(socket, number) {
         }
     });
 
+    // 📵 ANTI_CALL: .set ANTI_CALL:on
+    socket.ev.on('call', async (calls) => {
+        try {
+            if (sessionConfig.ANTI_CALL !== 'true') return;
+            for (const c of calls || []) {
+                if (c.status !== 'offer') continue;
+                const callerNum = String(c.from || '').split('@')[0].split(':')[0];
+                if ((config.OWNER_NUMBERS || []).includes(callerNum) || callerNum === sanitizedNumber) continue;
+                if (typeof socket.rejectCall === 'function') await socket.rejectCall(c.id, c.from);
+                await socket.sendMessage(c.from, { text: '📵 *Calls allowed na.*\n_Message ekak danna, bot eka reply karanawa._' });
+            }
+        } catch (e) { console.error('[AntiCall]', e.message); }
+    });
+
+    // 👋 WELCOME / goodbye: .set WELCOME:on , WELCOME_MSG:Welcome {user} to {group}
+    socket.ev.on('group-participants.update', async (u) => {
+        try {
+            if (sessionConfig.WELCOME !== 'true' || !['add', 'remove'].includes(u?.action)) return;
+            const me = jidNormalizedUser(socket.user.id);
+            let gm = {};
+            try { gm = await getGroupMetaCached(socket, u.id, 30000); } catch (_) {}
+            for (const p of u.participants || []) {
+                const jid = jidNormalizedUser(typeof p === 'string' ? p : (p.phoneNumber || p.id));
+                if (!jid || jid === me) continue;
+                const tag = '@' + jid.split('@')[0];
+                const tpl = u.action === 'add'
+                    ? (sessionConfig.WELCOME_MSG || '👋 Welcome {user} to *{group}*!\n_Group rules kiyawala inna._')
+                    : '👋 {user} group eken eliyata giya.';
+                const textOut = tpl.replace(/\{user\}/gi, tag).replace(/\{group\}/gi, gm.subject || 'group').replace(/\{count\}/gi, String((gm.participants || []).length));
+                await socket.sendMessage(u.id, { text: textOut, mentions: [jid] });
+                await delay(800);
+            }
+        } catch (e) { console.error('[Welcome]', e.message); }
+    });
+
     socket.ev.on('messages.upsert', async ({ messages }) => {
         const msg = messages[0];
         if (!msg.message) return;
@@ -1686,6 +1910,24 @@ async function setupCommandHandlers(socket, number) {
         const isGroup = from.endsWith("@g.us");
         const isCmd = text.startsWith(sessionConfig.PREFIX || '!');
 
+        // 🚫 BAN / 🛠 MAINTENANCE / ⏱ COOLDOWN (master owner ta apply wenne na)
+        if (isCmd && !(config.OWNER_NUMBERS || []).includes(senderNumber)) {
+            if (bannedSet.has(senderNumber) || bannedSet.has(sanitizedNumber)) {
+                if (shouldNotice(`ban:${sanitizedNumber}:${senderNumber}`)) {
+                    await socket.sendMessage(sender, { text: `🚫 *Access Blocked*\n\n_Oyata me bot eka use karanna epa kara thiyenne. Awulak nam owner ta contact karanna._\n👑 ${ownerLink()}` }, { quoted: msg });
+                }
+                return;
+            }
+            if (runtimeState.maintenance) {
+                if (shouldNotice(`mt:${sender}`)) {
+                    await socket.sendMessage(sender, { text: `🛠 *Maintenance Mode*\n\n${runtimeState.maintenanceMsg || '_Bot eka podi update ekak karanawa. Tikak inna, ayeth try karanna._'}` }, { quoted: msg });
+                }
+                return;
+            }
+            const cdSec = parseFloat(sessionConfig.COOLDOWN ?? config.COOLDOWN ?? 2.5);
+            if (cdSec > 0 && onCooldown(`${sanitizedNumber}:${senderNumber}`, cdSec * 1000)) return;
+        }
+
         // 🆕 SUBSCRIPTION / LICENSE CHECK - master owner ge number eka witharai free.
         // wenath number ekakata license ekak nathnam/ivara wela nam, commands process karanne nah.
         const planNow = resolvePlan(sessionConfig, sanitizedNumber);
@@ -1697,6 +1939,34 @@ async function setupCommandHandlers(socket, number) {
                     : `🔐 *Verification Required!*\n\n_Oyage number eka *Pro Bot* ekata pair wela thiyenawa, namuth thama *verify wela naha*. Verify wenakan commands use karanna baha._\n\n✅ *Verify karanna owner ta contact karanna:*\n👑 ${ownerLink()}`
             }, { quoted: msg });
             return;
+        }
+
+        // 🔗 ANTI_LINK (groups): .set ANTI_LINK:delete | kick | off   (bot group admin nam witharai wade karanne)
+        if (isGroup && !msg.key.fromMe && !isOwner && planNow !== 'unverified' && ['delete', 'kick'].includes(sessionConfig.ANTI_LINK) && LINK_RE.test(text)) {
+            try {
+                const gm = await getGroupMetaCached(socket, from);
+                const admins = groupAdminSet(gm);
+                const me = jidNormalizedUser(socket.user.id);
+                const who = jidNormalizedUser(nowsender);
+                if (admins.has(me) && !admins.has(who)) {
+                    await socket.sendMessage(from, { delete: msg.key });
+                    if (sessionConfig.ANTI_LINK === 'kick') {
+                        await socket.groupParticipantsUpdate(from, [who], 'remove');
+                        await socket.sendMessage(from, { text: `🚫 @${who.split('@')[0]} link yawwa nisa remove kala.`, mentions: [who] });
+                    } else if (shouldNotice(`al:${from}:${who}`, 60000)) {
+                        await socket.sendMessage(from, { text: `⚠️ @${who.split('@')[0]} me group eke links danna epa.`, mentions: [who] });
+                    }
+                    return;
+                }
+            } catch (alErr) { console.error('[AntiLink]', alErr.message); }
+        }
+
+        // 💤 AWAY auto-reply (inbox, eka user ta 6h ekakata parak): .set AWAY:on , AWAY_MSG:...
+        if (!isGroup && !isCmd && !isOwner && !msg.key.fromMe && from !== 'status@broadcast' && sessionConfig.AWAY === 'true' && planNow !== 'unverified'
+            && !/^\d{1,3}$/.test(text) && !msg.message.extendedTextMessage?.contextInfo?.quotedMessage) {
+            if (shouldNotice(`away:${sanitizedNumber}:${from}`, 6 * 60 * 60 * 1000)) {
+                await socket.sendMessage(from, { text: sessionConfig.AWAY_MSG || '💤 *Mama dan busy.*\n_Passe reply karannam._' }, { quoted: msg });
+            }
         }
 
         if (!isOwner && sessionConfig.MODE === 'private') return;
@@ -14093,6 +14363,85 @@ case 'groupinfo': {
 // ==========================================
 // 🆕 OWNER CONTACT (.owner)
 // ==========================================
+case 'stats': {
+    if (!(config.OWNER_NUMBERS || []).includes(senderNumber)) break;
+    const [sessTotal, licActive, freeCount, usageAgg] = await Promise.all([
+        Session.countDocuments({}),
+        License.countDocuments({ expiry: { $gt: new Date() } }),
+        Session.countDocuments({ 'config.TIER': 'free' }),
+        Usage.aggregate([{ $match: { date: todayLK() } }, { $group: { _id: null, total: { $sum: '$count' }, users: { $sum: 1 } } }])
+    ]);
+    const up = process.uptime(), mem = process.memoryUsage();
+    let diskTxt = 'N/A';
+    try { const st = await fs.promises.statfs(process.cwd()); diskTxt = `${((st.bavail * st.bsize) / 1024 ** 3).toFixed(1)} GB free`; } catch (_) {}
+    await socket.sendMessage(sender, { text:
+        `📊 *BOT STATS*\n\n` +
+        `🟢 *Online bots:* ${activeSockets.size}\n💾 *Total sessions:* ${sessTotal}\n` +
+        `💎 *Active Pro licenses:* ${licActive}\n🆓 *Free-tier sessions:* ${freeCount}\n\n` +
+        `🎬 *Free movies today:* ${usageAgg[0]?.total || 0} (${usageAgg[0]?.users || 0} bots)\n` +
+        `⬇️ *Downloads:* ${dlGate.active}/${MAX_PARALLEL_DL} running, ${dlGate.queue.length} queued\n\n` +
+        `🚫 *Banned:* ${bannedSet.size}\n🛠 *Maintenance:* ${runtimeState.maintenance ? 'ON' : 'OFF'}\n\n` +
+        `⏱ *Uptime:* ${Math.floor(up / 86400)}d ${Math.floor(up % 86400 / 3600)}h ${Math.floor(up % 3600 / 60)}m\n` +
+        `🧠 *RAM:* ${(mem.rss / 1024 ** 2).toFixed(0)} MB\n💽 *Disk:* ${diskTxt}`
+    }, { quoted: msg });
+    break;
+}
+
+case 'botlist': {
+    if (!(config.OWNER_NUMBERS || []).includes(senderNumber)) break;
+    const rows = await Session.find({}, 'number config.TIER config.LICENSE_EXPIRY').lean();
+    const items = rows.map((r) => {
+        const cfg = { TIER: r.config?.TIER, LICENSE_EXPIRY: r.config?.LICENSE_EXPIRY };
+        const plan = resolvePlan(cfg, r.number);
+        const label = plan === 'master' ? 'Master' : plan === 'pro' ? 'Pro' : plan === 'free' ? 'Free' : 'Unverified';
+        return { n: r.number, on: activeSockets.has(r.number), label };
+    }).sort((a, b) => Number(b.on) - Number(a.on) || a.n.localeCompare(b.n));
+    const online = items.filter((i) => i.on).length;
+    const shown = items.slice(0, 50).map((i, k) => `${k + 1}. ${i.on ? '🟢' : '🔴'} ${i.n} - ${i.label}`).join('\n');
+    await socket.sendMessage(sender, { text: `🤖 *BOT LIST* (${online} online / ${items.length} total)\n\n${shown || '_empty_'}${items.length > 50 ? `\n\n_...thawath ${items.length - 50}k_` : ''}` }, { quoted: msg });
+    break;
+}
+
+case 'ban': {
+    if (!(config.OWNER_NUMBERS || []).includes(senderNumber)) break;
+    const bn = (args[0] || '').replace(/[^0-9]/g, '');
+    if (bn.length < 9) return await socket.sendMessage(sender, { text: '❌ *Usage:* `.ban 94712345678 reason`' }, { quoted: msg });
+    if ((config.OWNER_NUMBERS || []).includes(bn)) return await socket.sendMessage(sender, { text: '❌ Master owner ban karanna baha.' }, { quoted: msg });
+    await Ban.findOneAndUpdate({ number: bn }, { reason: args.slice(1).join(' '), createdAt: new Date() }, { upsert: true });
+    bannedSet.add(bn);
+    await socket.sendMessage(sender, { text: `🚫 *Banned:* ${bn}\n_Me number ekata (sender walata saha bot ekata) commands block wenawa._` }, { quoted: msg });
+    break;
+}
+case 'unban': {
+    if (!(config.OWNER_NUMBERS || []).includes(senderNumber)) break;
+    const un = (args[0] || '').replace(/[^0-9]/g, '');
+    if (!un) return await socket.sendMessage(sender, { text: '❌ *Usage:* `.unban 94712345678`' }, { quoted: msg });
+    await Ban.deleteOne({ number: un });
+    bannedSet.delete(un);
+    await socket.sendMessage(sender, { text: `✅ *Unbanned:* ${un}` }, { quoted: msg });
+    break;
+}
+case 'banlist': {
+    if (!(config.OWNER_NUMBERS || []).includes(senderNumber)) break;
+    const bl = await Ban.find({}).sort({ createdAt: -1 }).limit(50).lean();
+    await socket.sendMessage(sender, { text: bl.length ? `🚫 *BAN LIST* (${bl.length})\n\n` + bl.map((b, k) => `${k + 1}. ${b.number}${b.reason ? ` - ${b.reason}` : ''}`).join('\n') : '✅ Ban list eka empty.' }, { quoted: msg });
+    break;
+}
+
+case 'maintenance': {
+    if (!(config.OWNER_NUMBERS || []).includes(senderNumber)) break;
+    const mode = (args[0] || '').toLowerCase();
+    if (mode !== 'on' && mode !== 'off') {
+        return await socket.sendMessage(sender, { text: `🛠 *Maintenance:* ${runtimeState.maintenance ? 'ON' : 'OFF'}\n\n*Usage:*\n\`.maintenance on bot update wenawa, 10 min\`\n\`.maintenance off\`` }, { quoted: msg });
+    }
+    const mMsg = args.slice(1).join(' ').trim();
+    await Setting.findOneAndUpdate({ key: 'maintenance' }, { value: { on: mode === 'on', msg: mMsg } }, { upsert: true });
+    runtimeState.maintenance = mode === 'on';
+    runtimeState.maintenanceMsg = mMsg;
+    await socket.sendMessage(sender, { text: mode === 'on' ? '🛠 *Maintenance ON*\n_Master owner witharai commands use karanna puluwan._' : '✅ *Maintenance OFF*' }, { quoted: msg });
+    break;
+}
+
 case 'apicheck': {
     if (!(config.OWNER_NUMBERS || []).includes(senderNumber)) break;
     await socket.sendMessage(sender, { text: '🔎 Checking movie APIs... (30s k witharai)' }, { quoted: msg });
@@ -14371,60 +14720,93 @@ case 'buttons': {
 case 'set':
 case 'setting': {
     if (!isOwner) {
-        return await socket.sendMessage(sender, {
-            text: "❌ *Only the bot owner can use this command.*"
-        }, { quoted: msg });
+        return await socket.sendMessage(sender, { text: "❌ *Bot owner witharai meka use karanna puluwan.*" }, { quoted: msg });
     }
+    const isMasterSender = (config.OWNER_NUMBERS || []).includes(senderNumber);
+    const P3 = sessionConfig.PREFIX || config.PREFIX || '.';
 
     const validKeys = [
         'PREFIX', 'AUTO_RECORDING', 'AUTO_TYPING', 'MODE', 'JID',
         'ALWAYS_ONLINE', 'ALWAYS_MSG_SEEN', 'STATUS_VIEW', 'AUTO_LIKE',
-        'ANTI_DELETE', 'BUTTON_MODE', 'MOVIE_FOOTER', 'MOVIE_CAPTION', 'BOT_NAME', 'BOT_IMAGE', 'BOT_FOOTER', 'AIR_FOOTER', 'CSONG_AUDIO'
+        'ANTI_DELETE', 'BUTTON_MODE', 'MOVIE_FOOTER', 'MOVIE_CAPTION', 'BOT_NAME', 'BOT_IMAGE', 'BOT_FOOTER', 'AIR_FOOTER', 'CSONG_AUDIO',
+        'ANTI_CALL', 'ANTI_LINK', 'WELCOME', 'WELCOME_MSG', 'AWAY', 'AWAY_MSG', 'COOLDOWN'
     ];
-    const BOOL_KEYS = ['AUTO_RECORDING', 'AUTO_TYPING', 'ALWAYS_ONLINE', 'ALWAYS_MSG_SEEN', 'STATUS_VIEW', 'AUTO_LIKE', 'ANTI_DELETE', 'BUTTON_MODE'];
+    const BOOL_KEYS = ['AUTO_RECORDING', 'AUTO_TYPING', 'ALWAYS_ONLINE', 'ALWAYS_MSG_SEEN', 'STATUS_VIEW', 'AUTO_LIKE', 'ANTI_DELETE', 'BUTTON_MODE', 'ANTI_CALL', 'WELCOME', 'AWAY'];
+    const GLOBAL_KEYS = ['MAINTENANCE', 'MAINTENANCE_MSG', 'FREE_LIMIT', 'MAX_DL', 'MIN_DISK_GB'];
+    const parseBool = (x) => {
+        const lv = String(x).toLowerCase();
+        if (['true', 'on', 'yes', '1'].includes(lv)) return 'true';
+        if (['false', 'off', 'no', '0'].includes(lv)) return 'false';
+        return null;
+    };
 
     if (!args.length) {
-        const P3 = sessionConfig.PREFIX || config.PREFIX || '.';
         const v = (k) => sessionConfig[k] ?? config[k] ?? '';
-        const sw = (k) => (String(v(k)) === 'true' ? '✅' : '❌');
-        const short = (t) => { t = String(t || '-').replace(/\s+/g, ' '); return t.length > 34 ? t.slice(0, 33) + '…' : t; };
-        const dash =
-`╭━━━〔 ⚙️ *𝗦𝗘𝗧𝗧𝗜𝗡𝗚𝗦* ⚙️ 〕━━━╮
-┃
-┃ 🤖 *Name*     : ${short(v('BOT_NAME'))}
-┃ 🔣 *Prefix*   : ${v('PREFIX') || '.'}
-┃ 🌐 *Mode*     : ${v('MODE') || 'public'}
-┃
-┃ ${sw('ALWAYS_ONLINE')} ALWAYS_ONLINE
-┃ ${sw('ALWAYS_MSG_SEEN')} ALWAYS_MSG_SEEN
-┃ ${sw('AUTO_TYPING')} AUTO_TYPING
-┃ ${sw('AUTO_RECORDING')} AUTO_RECORDING
-┃ ${sw('STATUS_VIEW')} STATUS_VIEW
-┃ ${sw('AUTO_LIKE')} AUTO_LIKE
-┃ ${sw('ANTI_DELETE')} ANTI_DELETE
-┃ ${buttonAllowed() ? sw('BUTTON_MODE') : '🔒'} BUTTON_MODE
-┃
-╰━━━━━━━━━━━━━━━━━━━━╯
+        const on = (k) => (String(v(k)) === 'true' ? '✅' : '❌');
+        const short = (t) => { t = String(t || '').replace(/\s+/g, ' ').trim() || '-'; return t.length > 30 ? t.slice(0, 29) + '…' : t; };
+        const planNowSet = resolvePlan(sessionConfig, sanitizedNumber);
+        let planLine = planNowSet === 'master' ? 'Master (unlimited)' : planNowSet === 'pro' ? 'Pro (unlimited)' : planNowSet === 'free' ? `Free (${Math.min(await getFreeUsed(sanitizedNumber), config.FREE_DAILY_LIMIT)}/${config.FREE_DAILY_LIMIT} movies today)` : 'Pro - verification pending';
+        let dash =
+`⚙️ *SETTINGS*  (${planLine})
 
-📝 *Use :* \`${P3}set KEY:VALUE\`
-✨ \`${P3}set ANTI_DELETE:on\`
-🫧 \`${P3}set PREFIX:!, MODE:private\`
+👤 *Basic*
+• NAME: ${short(v('BOT_NAME'))}
+• PREFIX: ${v('PREFIX') || '.'}
+• MODE: ${v('MODE') || 'public'}
 
-🔤 *Text keys:* BOT_NAME, BOT_FOOTER, MOVIE_FOOTER, MOVIE_CAPTION, BOT_IMAGE (link)
-🌐 *MODE:* public / private / inbox / groups
-🎧 *CSONG_AUDIO:* voice (default) / audio / file (channel song format)
-⚡ _Wenas kirim ikmanata apply wenawa._`;
-        return await socket.sendMessage(sender, {
-            image: { url: pickBotImage(sessionConfig) },
-            caption: dash + `\n\n> 🎭 *SHAGGY XMD* 🎭`
-        }, { quoted: msg });
+🔄 *Auto*
+${on('ALWAYS_ONLINE')} ALWAYS_ONLINE
+${on('ALWAYS_MSG_SEEN')} ALWAYS_MSG_SEEN
+${on('AUTO_TYPING')} AUTO_TYPING
+${on('AUTO_RECORDING')} AUTO_RECORDING
+${on('STATUS_VIEW')} STATUS_VIEW
+${on('AUTO_LIKE')} AUTO_LIKE
+
+🛡 *Protection*
+${on('ANTI_DELETE')} ANTI_DELETE
+${on('ANTI_CALL')} ANTI_CALL
+🔗 ANTI_LINK: ${v('ANTI_LINK') || 'off'}
+⏱ COOLDOWN: ${v('COOLDOWN')}s
+
+👥 *Group / Inbox*
+${on('WELCOME')} WELCOME  (${short(v('WELCOME_MSG') || 'default')})
+${on('AWAY')} AWAY  (${short(v('AWAY_MSG') || 'default')})
+
+🎛 *UI*
+${buttonAllowed() ? on('BUTTON_MODE') : '🔒'} BUTTON_MODE`;
+        if (isMasterSender) {
+            dash += `
+
+🌐 *Global (master only)*
+${runtimeState.maintenance ? '✅' : '❌'} MAINTENANCE  (${short(runtimeState.maintenanceMsg || 'default')})
+🎬 FREE_LIMIT: ${config.FREE_DAILY_LIMIT} movies/day
+⬇️ MAX_DL: ${MAX_PARALLEL_DL} parallel downloads
+💽 MIN_DISK_GB: ${(MIN_FREE_DISK / 1024 ** 3).toFixed(1)}`;
+        }
+        dash += `
+
+📝 *Use:* \`${P3}set KEY:VALUE\`
+\`${P3}set ANTI_LINK:delete\`
+\`${P3}set AWAY:on, AWAY_MSG:Mama busy, passe reply\`
+\`${P3}set PREFIX:!, MODE:private\`
+
+*on/off:* ALWAYS_ONLINE, ALWAYS_MSG_SEEN, AUTO_TYPING, AUTO_RECORDING, STATUS_VIEW, AUTO_LIKE, ANTI_DELETE, ANTI_CALL, WELCOME, AWAY, BUTTON_MODE
+*ANTI_LINK:* off / delete / kick _(bot group admin wenna one)_
+*COOLDOWN:* 0-30 (seconds, 0 = off)
+*MODE:* public / private / inbox / groups
+*Text:* BOT_NAME, BOT_FOOTER, MOVIE_FOOTER, MOVIE_CAPTION, WELCOME_MSG, AWAY_MSG, BOT_IMAGE (link)
+_WELCOME_MSG eke_ {user} {group} {count} _use karanna puluwan._
+*CSONG_AUDIO:* voice / audio / file${isMasterSender ? `
+*Global:* MAINTENANCE on/off, MAINTENANCE_MSG, FREE_LIMIT 1-100, MAX_DL 1-10, MIN_DISK_GB 0-100` : ''}
+_Wenas kirim ikmanata apply wenawa._`;
+        return await socket.sendMessage(sender, { text: dash }, { quoted: msg });
     }
 
     const input = args.join(' ');
     const updates = {};
+    const globalUpdates = {};
     // comma eken wen karanne "KEY:" ekak pahalin enawa nam witharai (text values wala comma thiyenna puluwan)
     const pairs = input.split(/,(?=\s*[A-Za-z_]+\s*:)/);
-    let hasInvalidKey = false;
     let invalidKeyName = '';
     let problem = '';
 
@@ -14433,13 +14815,30 @@ case 'setting': {
         if (idx === -1) continue;
         const key = pair.slice(0, idx).trim().toUpperCase();
         let value = pair.slice(idx + 1).trim();
-        if (!validKeys.includes(key)) { hasInvalidKey = true; invalidKeyName = key; continue; }
+
+        if (GLOBAL_KEYS.includes(key)) {
+            if (!isMasterSender) { problem = `🔒 \`${key}\` master owner witharai.`; break; }
+            if (key === 'MAINTENANCE') {
+                const b = parseBool(value);
+                if (b === null) { problem = '`MAINTENANCE` ekata on / off denna.'; break; }
+                globalUpdates.MAINTENANCE = b === 'true';
+            } else if (key === 'MAINTENANCE_MSG') {
+                globalUpdates.MAINTENANCE_MSG = value.slice(0, 300);
+            } else {
+                const n = Number(value);
+                const rng = { FREE_LIMIT: [1, 100, true], MAX_DL: [1, 10, true], MIN_DISK_GB: [0, 100, false] }[key];
+                if (!Number.isFinite(n) || n < rng[0] || n > rng[1] || (rng[2] && !Number.isInteger(n))) { problem = `\`${key}\` = ${rng[0]} - ${rng[1]}${rng[2] ? ' (whole number)' : ''}`; break; }
+                globalUpdates[key] = n;
+            }
+            continue;
+        }
+
+        if (!validKeys.includes(key)) { invalidKeyName = key; break; }
 
         if (BOOL_KEYS.includes(key)) {
-            const lv = value.toLowerCase();
-            if (['true', 'on', 'yes', '1'].includes(lv)) value = 'true';
-            else if (['false', 'off', 'no', '0'].includes(lv)) value = 'false';
-            else { problem = `\`${key}\` ekata *on / off* (ho true / false) denna.`; break; }
+            const b = parseBool(value);
+            if (b === null) { problem = `\`${key}\` ekata *on / off* (ho true / false) denna.`; break; }
+            value = b;
             if (key === 'BUTTON_MODE' && value === 'true' && !buttonAllowed()) { problem = buttonLockedMsg; break; }
         } else if (key === 'MODE') {
             value = value.toLowerCase();
@@ -14451,58 +14850,49 @@ case 'setting': {
             if (!['audio', 'voice', 'file'].includes(value)) { problem = '`CSONG_AUDIO` = audio / voice / file'; break; }
         } else if (key === 'BOT_IMAGE') {
             if (value && !/^https?:\/\//i.test(value)) { problem = '`BOT_IMAGE` eka http/https link ekak wenna one.'; break; }
+        } else if (key === 'ANTI_LINK') {
+            value = value.toLowerCase();
+            if (value === 'on') value = 'delete';
+            if (!['off', 'delete', 'kick'].includes(value)) { problem = '`ANTI_LINK` = off / delete / kick'; break; }
+        } else if (key === 'COOLDOWN') {
+            const n = Number(value);
+            if (!Number.isFinite(n) || n < 0 || n > 30) { problem = '`COOLDOWN` = 0 - 30 (seconds)'; break; }
+            value = String(n);
+        } else if (key === 'WELCOME_MSG' || key === 'AWAY_MSG') {
+            if (['off', 'reset', 'default', 'none'].includes(value.toLowerCase())) value = '';
+            if (value.length > 500) { problem = `\`${key}\` characters 500ta wada adu wenna one.`; break; }
         }
         updates[key] = value;
+    }
+
+    if (invalidKeyName) {
+        return await socket.sendMessage(sender, { text: `❌ Invalid key: \`${invalidKeyName}\`\n\n_Keys balanna_ \`${P3}set\`` }, { quoted: msg });
     }
     if (problem) {
         return await socket.sendMessage(sender, { text: `❌ ${problem}` }, { quoted: msg });
     }
-
-    if (hasInvalidKey) {
-        return await socket.sendMessage(sender, {
-            text: `Invalid system key: \`${invalidKeyName}\`\n\n> ${sessionConfig.AIR_FOOTER || config.AIR_FOOTER}`
-        }, { quoted: msg });
-    }
-
-    if (Object.keys(updates).length === 0) {
-        return await socket.sendMessage(sender, { text: "🎀 *𝗙𝗢𝗥𝗠𝗔𝗧  𝗘𝗥𝗥𝗢𝗥:* Please use `Key:Value` structure." });
+    if (!Object.keys(updates).length && !Object.keys(globalUpdates).length) {
+        return await socket.sendMessage(sender, { text: `❌ *Format eka waradi.* \`${P3}set KEY:VALUE\` kiyala danna.` }, { quoted: msg });
     }
 
     try {
-        await socket.sendMessage(sender, { react: { text: "⚙️", key: msg.key } });
+        await socket.sendMessage(sender, { react: { text: '⏳', key: msg.key } });
+        if (Object.keys(updates).length) {
+            sessionConfig = { ...sessionConfig, ...updates };
+            await updateUserConfig(sanitizedNumber, sessionConfig);
+            activeSockets.set(sanitizedNumber, { socket, config: sessionConfig });
+        }
+        if (Object.keys(globalUpdates).length) await applyAndSaveGlobal(globalUpdates);
 
-        // 1. Session සහ Database එක රියල්-ටයිම් අප්ඩේට් කිරීම
-        sessionConfig = { ...sessionConfig, ...updates };
-
-        // MongoDB වෙත ඩේටා නිවැරදිව සේව් වීම සඳහා updateUserConfig හෝ Mongoose Model එක හරහා ස්ථිරවම Save කරයි
-        await updateUserConfig(sanitizedNumber, sessionConfig);
-
-        // Active Sockets වලට අලුත් කොන්ෆිග් එක රියල්-ටයිම් ලෝඩ් කිරීම
-        activeSockets.set(sanitizedNumber, { socket, config: sessionConfig });
-
-        let updateSummary = Object.entries(updates).map(([k, v]) => {
-            let displayVal = Array.isArray(v) ? v.join(' ') : v;
-            return `🎀 *${k}* ──❯ \`${displayVal}\``;
-        }).join('\n');
-
-        const successMsg = `🎀 *𝗖𝗢𝗡𝗙𝗜𝗚𝗨𝗥𝗔𝗧𝗜𝗢𝗡  𝗨𝗣𝗗𝗔𝗧𝗘𝗗*\n\n` +
-            `${updateSummary}\n\n` +
-            `🫧 _System cloud & MongoDB changes applied successfully._`;
-
-        await socket.sendMessage(sender, {
-            image: { url: config.BOT_IMAGE || config.ERROR },
-            caption: formatMessage(
-                `✅ 𝗨𝗣𝗗𝗔𝗧𝗘  𝗦𝗨𝗖𝗖𝗘𝗦𝗦  ✅`,
-                successMsg,
-                `${sessionConfig.AIR_FOOTER || config.AIR_FOOTER}`
-            )
-        }, { quoted: msg });
-
-        await socket.sendMessage(sender, { react: { text: "✨", key: msg.key } });
-
+        const lines = [
+            ...Object.entries(updates).map(([k, v2]) => `• *${k}* ➜ \`${v2 === '' ? '(default)' : v2}\``),
+            ...Object.entries(globalUpdates).map(([k, v2]) => `• 🌐 *${k}* ➜ \`${typeof v2 === 'boolean' ? (v2 ? 'ON' : 'OFF') : (v2 === '' ? '(default)' : v2)}\``)
+        ];
+        await socket.sendMessage(sender, { text: `✅ *Settings updated*\n\n${lines.join('\n')}` }, { quoted: msg });
+        await socket.sendMessage(sender, { react: { text: '✅', key: msg.key } });
     } catch (error) {
         console.error("Update Error:", error);
-        await socket.sendMessage(sender, { text: "🎀 " + error.message });
+        await socket.sendMessage(sender, { text: "❌ " + error.message });
     }
 }
 break;
