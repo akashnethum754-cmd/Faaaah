@@ -931,6 +931,7 @@ async function runApiChecks() {
         ch('sinhalatop', '/api/v1/cartoons/sinhalatop/search'), ch('cartoons', '/api/v1/movies/cartoons/search'),
         ch('sinhalacartoons', '/api/v1/cartoons/sinhalacartoons/search'), ch('animexin', '/api/v1/anime/animexin/search'),
         ch('watchwrestling', '/api/v1/wrestling/watchwrestling/search', 'wwe'),
+        { name: 'telegram resolver', url: `${CH_BASE}/api/v1/telegram/dl`, params: { url: 'https://t.me/dinkamovieslk/176', api_key: CH_KEY } },
         { name: 'dubzone (heroku)', url: 'https://api-siteh-22e22e4cb068.herokuapp.com/api/dubzone/search', params: { q: Q } },
         { name: 'thinkiri (heroku)', url: 'https://api-siteh-22e22e4cb068.herokuapp.com/tinkiri/search', params: { q: Q } },
         { name: 'vault (lovable)', url: 'https://stream-vault-api.lovable.app/api/public/v1/search', params: { q: Q }, headers: { 'x-api-key': 'mvk_796aa89023bfa0a1bca326895f5c30495064a557c948674b' } }
@@ -1261,7 +1262,7 @@ const MOVIE_COMMANDS = new Set([
     'moviemania','mm','mmlk','cin','cinz','cmovie','subzlk','subz','chithrapata','chithra','chmovie','dubzone',
     'dubzonesearch','thinkiri','thenkiri','sinhalatop','sinhalatopsearch','cinbz','cinetv','pupilmovie','pupil',
     'moviesublk','msubz','mslk','movieall','m','anime','animexin','donghua','ax','cartoon','cartoonlk','cartoon2',
-    'sinhalacartoon','wrestling','watchwrestling','rexporn','rxporn','rp'
+    'sinhalacartoon','wrestling','watchwrestling','rexporn','rxporn','rp','tg','telegram','tgdl'
 ]);
 
 const isVideoDoc = (c) => {
@@ -14588,6 +14589,68 @@ case 'getcase': {
     const gn = (args[0] || '').toLowerCase().replace(/^[^a-z0-9]+/, '');
     const got = customCases.get(gn);
     await socket.sendMessage(sender, { text: got ? `🧩 *${gn}*\n\n${'ca' + 'se'} '${gn}':\n${got.code}` : `❌ \`${gn || '?'}\` kiyala custom case ekak naha.` }, { quoted: msg });
+    break;
+}
+
+case 'tg':
+case 'telegram':
+case 'tgdl': {
+    // 📥 Telegram link (t.me/...) eken file eka download karala WhatsApp ekata yawanawa
+    const tgPrefix = sessionConfig.PREFIX || '.';
+    const tgQuoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+    const tgQuotedText = tgQuoted ? (tgQuoted.conversation || tgQuoted.extendedTextMessage?.text || '') : '';
+    const tgLink = ((args.join(' ') + ' ' + tgQuotedText).match(/https?:\/\/(?:www\.)?(?:t|telegram)\.me\/[^\s]+/i) || [])[0];
+    const tgLinkOnly = args.some((a) => ['link', 'links', 'dl'].includes(a.toLowerCase()));
+    if (!tgLink) {
+        await socket.sendMessage(sender, { text: `📥 *TELEGRAM DOWNLOADER*\n\n*Use:*\n• \`${tgPrefix}tg https://t.me/channel/123\`\n• Link ekakata reply karala \`${tgPrefix}tg\`\n• Link witharak one nam: \`${tgPrefix}tg <link> link\`\n\n_Public channel / group message links wada karanawa._` }, { quoted: msg });
+        break;
+    }
+    await socket.sendMessage(sender, { react: { text: '🔎', key: msg.key } });
+    let tgData;
+    try {
+        const tgRes = await axios.get(`${CH_BASE}/api/v1/telegram/dl`, { params: { url: tgLink, api_key: CH_KEY }, timeout: 90000 });
+        tgData = tgRes.data;
+    } catch (tgErr) {
+        await socket.sendMessage(sender, { text: `❌ *Telegram link eka resolve karanna baha*\n\n${String(tgErr.message).slice(0, 200)}` }, { quoted: msg });
+        await socket.sendMessage(sender, { react: { text: '❌', key: msg.key } });
+        break;
+    }
+    if (!tgData?.status || !tgData.download_url) {
+        await socket.sendMessage(sender, { text: `❌ *File eka hoyaganna baha*\n\n${String(tgData?.message || tgData?.error || 'Link eka waradi ho private channel ekak').slice(0, 200)}` }, { quoted: msg });
+        await socket.sendMessage(sender, { react: { text: '❌', key: msg.key } });
+        break;
+    }
+    const tgName = String(tgData.file_name || tgData.title || 'telegram_file').replace(/[\\/:*?"<>|%]+/g, '_').slice(0, 150);
+    const tgSize = Number(tgData.file_size_bytes) || 0;
+    const tgInfo = `📥 *TELEGRAM FILE*\n\n📄 ${tgName}\n📦 ${tgData.file_size || '?'}\n🎞 ${tgData.mime_type || '-'}`;
+    const tgLinks = `\n\n⬇️ *Download:*\n${tgData.download_url}${tgData.stream_url ? `\n\n▶️ *Stream:*\n${tgData.stream_url}` : ''}`;
+    if (tgLinkOnly || tgSize > 2 * 1024 ** 3 - 5e6) {
+        await socket.sendMessage(sender, { text: tgInfo + (tgLinkOnly ? '' : '\n\n_2GB wada loku nisa WhatsApp ekata yawanna baha. Link eken download karanna._') + tgLinks }, { quoted: msg });
+        await socket.sendMessage(sender, { react: { text: '✅', key: msg.key } });
+        break;
+    }
+    await socket.sendMessage(sender, { text: tgInfo + '\n\n⏳ _Download karanawa, tikak inna..._' }, { quoted: msg });
+    const tgDir = path.join(process.cwd(), 'tmp_tg');
+    await fs.ensureDir(tgDir);
+    const tgPath = path.join(tgDir, `${Date.now()}_${tgName}`);
+    try {
+        await robustDownload(tgData.download_url, tgPath, '');
+        await socket.sendMessage(sender, {
+            document: { url: tgPath },
+            mimetype: tgData.mime_type || 'application/octet-stream',
+            fileName: tgName,
+            caption: `📄 ${tgName}\n📦 ${tgData.file_size || ''}${sessionConfig.MOVIE_FOOTER ? `\n\n${sessionConfig.MOVIE_FOOTER}` : ''}`
+        }, { quoted: msg });
+        await socket.sendMessage(sender, { react: { text: '✅', key: msg.key } });
+    } catch (tgSendErr) {
+        console.error('[tg] failed:', tgSendErr.message);
+        await socket.sendMessage(sender, { react: { text: '❌', key: msg.key } });
+        if (!/Daily free limit/.test(tgSendErr.message)) {   // limit message eka wrapper eken kalinma gihin thiyenawa
+            await socket.sendMessage(sender, { text: `❌ *File eka yawanna baha:* ${String(tgSendErr.message).slice(0, 200)}\n\n_Link eken download karanna:_${tgLinks}` }, { quoted: msg });
+        }
+    } finally {
+        await fs.remove(tgPath).catch(() => {});
+    }
     break;
 }
 
