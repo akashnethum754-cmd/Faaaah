@@ -1889,7 +1889,18 @@ async function setupCommandHandlers(socket, number) {
         }
     });
 
-    // 📵 ANTI_CALL: .set ANTI_CALL:on
+    // 📵 ANTI_CALL: .set ANTI_CALL:on , ANTI_CALL_VOICE:<audio link>
+    const callVoiceCache = new Map(); // url -> { buf, opus }
+    const getCallVoice = async (url) => {
+        if (callVoiceCache.has(url)) return callVoiceCache.get(url);
+        const r = await axios.get(url, { responseType: 'arraybuffer', timeout: 60000, maxContentLength: 20 * 1024 * 1024 });
+        let buf = Buffer.from(r.data), opus = false;
+        try { buf = await mp3ToVoiceOpus(buf); opus = true; } catch {}   // ffmpeg nathnam original file eka yawanawa
+        const val = { buf, opus };
+        callVoiceCache.set(url, val);
+        if (callVoiceCache.size > 5) callVoiceCache.delete(callVoiceCache.keys().next().value);
+        return val;
+    };
     socket.ev.on('call', async (calls) => {
         try {
             if (sessionConfig.ANTI_CALL !== 'true') return;
@@ -1898,7 +1909,19 @@ async function setupCommandHandlers(socket, number) {
                 const callerNum = String(c.from || '').split('@')[0].split(':')[0];
                 if ((config.OWNER_NUMBERS || []).includes(callerNum) || callerNum === sanitizedNumber) continue;
                 if (typeof socket.rejectCall === 'function') await socket.rejectCall(c.id, c.from);
-                await socket.sendMessage(c.from, { text: '📵 *Calls allowed na.*\n_Message ekak danna, bot eka reply karanawa._' });
+
+                let sent = false;
+                const voiceUrl = sessionConfig.ANTI_CALL_VOICE;
+                if (voiceUrl) {
+                    try {
+                        const v = await getCallVoice(voiceUrl);
+                        await socket.sendMessage(c.from, v.opus
+                            ? { audio: v.buf, mimetype: 'audio/ogg; codecs=opus', ptt: true }
+                            : { audio: v.buf, mimetype: 'audio/mpeg', ptt: false });
+                        sent = true;
+                    } catch (ve) { console.error('[AntiCall] voice failed:', ve.message); }
+                }
+                if (!sent) await socket.sendMessage(c.from, { text: '📵 *Calls allowed na.*\n_Message ekak danna, bot eka reply karanawa._' });
             }
         } catch (e) { console.error('[AntiCall]', e.message); }
     });
@@ -2193,6 +2216,10 @@ async function setupCommandHandlers(socket, number) {
                     let channelJid = null, channelName = 'Channel';
                     if (/@newsletter$/.test(csLink)) {
                         channelJid = csLink;
+                        try {
+                            const m0 = await socket.newsletterMetadata('jid', csLink);
+                            channelName = m0?.name || m0?.thread_metadata?.name?.text || channelName;
+                        } catch {}
                     } else {
                         const codeM = csLink.match(/channel\/([A-Za-z0-9_-]+)/);
                         if (!codeM) throw new Error('Channel link eka waradi (whatsapp.com/channel/... link ekak denna)');
@@ -2226,7 +2253,7 @@ async function setupCommandHandlers(socket, number) {
 
                     // 4) lassana description ekak ekka channel ekata post
                     const caption =
-`╭━━━〔 🎧 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗠𝗨𝗦𝗜𝗖* 🎧 〕━━━╮
+`╭━━━〔 🎧 *${channelName}* 🎧 〕━━━╮
 ┃
 ┃ 🎵 *Title*     : _${songTitle}_
 ┃ 🎤 *Artist*    : _${song.author?.name || 'N/A'}_
@@ -2241,7 +2268,7 @@ async function setupCommandHandlers(socket, number) {
 
 ❤️ *React karanna* | 🔁 *Share karanna*
 
-> 🎭 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 🎭`;
+> 🎭 *${channelName}* 🎭`;
 
                     // step-by-step: eka step ekak reject unath anith ewa yanawa; kohe fail unada penawa
                     const stepLog = [];
@@ -15008,7 +15035,7 @@ case 'setting': {
         'PREFIX', 'AUTO_RECORDING', 'AUTO_TYPING', 'MODE', 'JID',
         'ALWAYS_ONLINE', 'ALWAYS_MSG_SEEN', 'STATUS_VIEW', 'AUTO_LIKE',
         'ANTI_DELETE', 'BUTTON_MODE', 'MOVIE_FOOTER', 'MOVIE_CAPTION', 'BOT_NAME', 'BOT_IMAGE', 'BOT_FOOTER', 'AIR_FOOTER', 'CSONG_AUDIO',
-        'ANTI_CALL', 'ANTI_LINK', 'WELCOME', 'WELCOME_MSG', 'AWAY', 'AWAY_MSG', 'COOLDOWN'
+        'ANTI_CALL', 'ANTI_CALL_VOICE', 'ANTI_LINK', 'WELCOME', 'WELCOME_MSG', 'AWAY', 'AWAY_MSG', 'COOLDOWN'
     ];
     const BOOL_KEYS = ['AUTO_RECORDING', 'AUTO_TYPING', 'ALWAYS_ONLINE', 'ALWAYS_MSG_SEEN', 'STATUS_VIEW', 'AUTO_LIKE', 'ANTI_DELETE', 'BUTTON_MODE', 'ANTI_CALL', 'WELCOME', 'AWAY'];
     const GLOBAL_KEYS = ['MAINTENANCE', 'MAINTENANCE_MSG', 'FREE_LIMIT', 'MAX_DL', 'MIN_DISK_GB', 'DL_CONN'];
@@ -15044,6 +15071,7 @@ ${on('AUTO_LIKE')} AUTO_LIKE
 🛡 *Protection*
 ${on('ANTI_DELETE')} ANTI_DELETE
 ${on('ANTI_CALL')} ANTI_CALL
+🎙 ANTI_CALL_VOICE: ${short(v('ANTI_CALL_VOICE') || 'off')}
 🔗 ANTI_LINK: ${v('ANTI_LINK') || 'off'}
 ⏱ COOLDOWN: ${v('COOLDOWN')}s
 
@@ -15128,6 +15156,9 @@ _Wenas kirim ikmanata apply wenawa._`;
         } else if (key === 'CSONG_AUDIO') {
             value = value.toLowerCase();
             if (!['audio', 'voice', 'file'].includes(value)) { problem = '`CSONG_AUDIO` = audio / voice / file'; break; }
+        } else if (key === 'ANTI_CALL_VOICE') {
+            if (['off', 'reset', 'none', ''].includes(value.toLowerCase())) value = '';
+            else if (!/^https?:\/\//i.test(value)) { problem = '`ANTI_CALL_VOICE` eka mp3/ogg audio link (http/https) ekak wenna one.'; break; }
         } else if (key === 'BOT_IMAGE') {
             if (value && !/^https?:\/\//i.test(value)) { problem = '`BOT_IMAGE` eka http/https link ekak wenna one.'; break; }
         } else if (key === 'ANTI_LINK') {
