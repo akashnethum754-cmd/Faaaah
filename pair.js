@@ -10,6 +10,7 @@ import axios from 'axios';
 import dotenv from 'dotenv';
 import yts from 'yt-search';
 import { pipeline } from 'stream/promises';
+import { fileURLToPath } from 'url';
 import splitFileModule from 'split-file';
 import crypto from 'node:crypto';
 import os from 'os';
@@ -1184,6 +1185,76 @@ function groupAdminSet(gm) {
 }
 const LINK_RE = /(https?:\/\/|www\.|chat\.whatsapp\.com\/|wa\.me\/)\S+/i;
 
+
+// ==========================================
+// 🧩 CUSTOM CASES: chat eken ".case <code>" dunnama bot ekata aluth command ekak add wenawa (DB eke save, restart one na)
+//  - master owner witharai add/delete karanna puluwan
+//  - Mongo eke thiyena nisa restart/redeploy unath nathi wenne na, hama bot ekakatama apply wenawa
+// ==========================================
+const CustomCase = mongoose.model('CustomCase', new mongoose.Schema({
+    name: { type: String, required: true, unique: true },
+    code: { type: String, required: true },
+    addedBy: { type: String, default: '' },
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now }
+}));
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+const customCases = new Map();   // name -> { fn, code }
+let builtinCases = null;
+function getBuiltinCases() {
+    if (!builtinCases) {
+        builtinCases = new Set();
+        try {
+            const src = fs.readFileSync(fileURLToPath(import.meta.url), 'utf8');
+            for (const m of src.matchAll(/^\s*case\s+'([^'\n]+)'\s*:/gm)) builtinCases.add(m[1].toLowerCase());
+        } catch (e) { console.error('[CustomCase] builtin scan failed:', e.message); }
+    }
+    return builtinCases;
+}
+// phone keyboard walin enakota smart quotes / code fences wenas wenawa => hariyata hadanawa
+function normalizeCaseSource(raw) {
+    return String(raw || '')
+        .replace(/[\u2018\u2019\u201B]/g, "'").replace(/[\u201C\u201D]/g, '"')
+        .replace(/[\u00A0\u200B]/g, ' ')
+        .replace(/^\s*```[a-zA-Z]*\s*\n?/, '').replace(/\n?\s*```\s*$/, '')
+        .trim();
+}
+function parseCaseInput(raw) {
+    let src = normalizeCaseSource(raw);
+    const names = [];
+    const re = /^\s*case\s+(['"`])([^'"`\n]+)\1\s*:/;
+    let m;
+    while ((m = re.exec(src))) { names.push(m[2].toLowerCase().trim()); src = src.slice(m[0].length); }
+    if (!names.length) return { error: "Code eka patan ganna one `case 'name':` kiyala." };
+    const bad = names.find((n) => !/^[a-z0-9_-]{1,30}$/.test(n));
+    if (bad) return { error: `Command nama \`${bad}\` waradi (a-z, 0-9, _ - witharai, 30ta adu).` };
+    const body = src.trim();
+    if (!body) return { error: 'Case eka athule code naha.' };
+    return { names, body };
+}
+const CASE_CTX = ['socket', 'sender', 'from', 'msg', 'args', 'text', 'command', 'prefix', 'reply', 'sessionConfig', 'sanitizedNumber', 'senderNumber', 'nowsender',
+    'isOwner', 'isGroup', 'isAdmins', 'isBotAdmins', 'groupMetadata', 'participants', 'groupAdmins', 'config', 'activeSockets', 'axios', 'fs', 'path', 'moment',
+    'delay', 'crypto', 'yts', 'sharp', 'exec', 'spawn', 'mongoose', 'downloadContentFromMessage', 'jidNormalizedUser', 'pickBotImage', 'formatMessage',
+    'streamToBuffer', 'unwrap', 'getFreeUsed', 'resolvePlan'];
+function compileCase(body) {
+    return new AsyncFunction('__c', `const { ${CASE_CTX.join(', ')} } = __c;\nswitch (0) {\ncase 0:\n${body}\n}`);
+}
+async function loadCustomCases() {
+    try {
+        const docs = await CustomCase.find({}).lean();
+        const next = new Map();
+        for (const d of docs) {
+            if (getBuiltinCases().has(d.name)) continue;      // built-in command ekata override wenne na
+            try { next.set(d.name, { fn: compileCase(d.code), code: d.code }); }
+            catch (e) { console.error(`[CustomCase] ${d.name} compile error:`, e.message); }
+        }
+        customCases.clear();
+        for (const [k, v] of next) customCases.set(k, v);
+    } catch (e) { console.error('[CustomCase] load failed:', e.message); }
+}
+setTimeout(loadCustomCases, 10000);
+setInterval(loadCustomCases, 2 * 60 * 1000);
+
 const MOVIE_COMMANDS = new Set([
     'cinesubz','sinhalasub','cinesend','tvsend','dinka','dinkamovies','dinkamovieslk','moviehubbd','mhbd','bw',
     'movie','mv','cineverse','cv','lakvision','lv','piratelk','plk','tamilmv','tamil','cinemx','cmx','nethmv','vault',
@@ -2013,6 +2084,22 @@ async function setupCommandHandlers(socket, number) {
         const reply = async (text, options = {}) => {
             await socket.sendMessage(msg.key.remoteJid, { text, ...options }, { quoted: msg });
         };
+
+        // 🧩 .case eken add karapu custom commands
+        if (customCases.has(command)) {
+            try {
+                await customCases.get(command).fn({
+                    socket, sender, from, msg, args, text, command, prefix: sessionConfig.PREFIX || '.', reply, sessionConfig, sanitizedNumber, senderNumber, nowsender,
+                    isOwner, isGroup, isAdmins, isBotAdmins, groupMetadata, participants, groupAdmins, config, activeSockets, axios, fs, path, moment,
+                    delay, crypto, yts, sharp, exec, spawn, mongoose, downloadContentFromMessage, jidNormalizedUser, pickBotImage, formatMessage,
+                    streamToBuffer, unwrap, getFreeUsed, resolvePlan
+                });
+            } catch (ccErr) {
+                console.error(`[CustomCase] ${command} runtime error:`, ccErr);
+                await socket.sendMessage(sender, { text: `❌ *Custom case error* (${command})\n\n\`${String(ccErr.message).slice(0, 300)}\`` }, { quoted: msg });
+            }
+            return;
+        }
 
         try {
             switch (command) {
@@ -14439,6 +14526,68 @@ case 'maintenance': {
     runtimeState.maintenance = mode === 'on';
     runtimeState.maintenanceMsg = mMsg;
     await socket.sendMessage(sender, { text: mode === 'on' ? '🛠 *Maintenance ON*\n_Master owner witharai commands use karanna puluwan._' : '✅ *Maintenance OFF*' }, { quoted: msg });
+    break;
+}
+
+case 'case':
+case 'addcase': {
+    if (!(config.OWNER_NUMBERS || []).includes(senderNumber)) break;
+    const P4 = sessionConfig.PREFIX || '.';
+    const rawCase = text.replace(/^\S+\s*/, '');
+    if (!rawCase.trim()) {
+        const kw = 'ca' + 'se';
+        return await socket.sendMessage(sender, { text:
+            `🧩 *ADD CASE*\n\nCommand ekak add karanna, case eka paste karanna:\n\n` +
+            `${P4}case\n${kw} 'hello': {\n    await reply('Hello! 👋');\n    break;\n}\n\n` +
+            `✅ Add unama ikmanata active wenawa (restart one na, DB ekata save wenawa)\n` +
+            `✅ Nama godak: ${kw} 'a': ${kw} 'b': { ... }\n` +
+            `✅ Thiyena custom case ekak aye dunnoth update wenawa\n\n` +
+            `*Use karanna puluwan:* socket, sender, msg, args, text, reply(), sessionConfig, isOwner, isGroup, isAdmins, isBotAdmins, groupMetadata, axios, fs, path, moment, delay, yts, sharp, config, downloadContentFromMessage, pickBotImage, formatMessage ...\n\n` +
+            `*Commands:* ${P4}delcase <name>, ${P4}caselist, ${P4}getcase <name>\n\n` +
+            `⚠️ _Meka bot eka athule code run karanawa. Oyama liyapu / hariyatama balapu code witharak paste karanna._`
+        }, { quoted: msg });
+    }
+    const parsedCase = parseCaseInput(rawCase);
+    if (parsedCase.error) return await socket.sendMessage(sender, { text: `❌ ${parsedCase.error}` }, { quoted: msg });
+    const dupNames = parsedCase.names.filter((n) => getBuiltinCases().has(n));
+    if (dupNames.length) return await socket.sendMessage(sender, { text: `❌ \`${dupNames.join(', ')}\` kalinma bot eke thiyenawa. Wena nama ekak danna.` }, { quoted: msg });
+    let caseFn;
+    try { caseFn = compileCase(parsedCase.body); }
+    catch (synErr) { return await socket.sendMessage(sender, { text: `❌ *Syntax error*\n\n\`${synErr.message}\`\n\n_Code eka hariyata balala aye danna._` }, { quoted: msg }); }
+    const updatedNames = [];
+    for (const nm of parsedCase.names) {
+        const existed = customCases.has(nm);
+        await CustomCase.findOneAndUpdate({ name: nm }, { code: parsedCase.body, addedBy: senderNumber, updatedAt: new Date() }, { upsert: true });
+        customCases.set(nm, { fn: caseFn, code: parsedCase.body });
+        updatedNames.push(`${P4}${nm}${existed ? ' (updated)' : ''}`);
+    }
+    await socket.sendMessage(sender, { text: `✅ *Case added*\n\n${updatedNames.join('\n')}\n\n_Dan wada karanawa. Test karala balanna._` }, { quoted: msg });
+    break;
+}
+
+case 'delcase': {
+    if (!(config.OWNER_NUMBERS || []).includes(senderNumber)) break;
+    const dn = (args[0] || '').toLowerCase().replace(/^[^a-z0-9]+/, '');
+    if (!dn) return await socket.sendMessage(sender, { text: `❌ *Usage:* \`${sessionConfig.PREFIX || '.'}delcase name\`` }, { quoted: msg });
+    const delRes = await CustomCase.deleteOne({ name: dn });
+    customCases.delete(dn);
+    await socket.sendMessage(sender, { text: delRes.deletedCount ? `🗑 *Deleted:* ${dn}` : `❌ \`${dn}\` kiyala custom case ekak naha. (built-in commands delete karanna ba)` }, { quoted: msg });
+    break;
+}
+
+case 'caselist':
+case 'cases': {
+    if (!(config.OWNER_NUMBERS || []).includes(senderNumber)) break;
+    const names = [...customCases.keys()].sort();
+    await socket.sendMessage(sender, { text: names.length ? `🧩 *CUSTOM CASES* (${names.length})\n\n` + names.map((n, k) => `${k + 1}. ${sessionConfig.PREFIX || '.'}${n}`).join('\n') : '🧩 Custom cases naha. `' + (sessionConfig.PREFIX || '.') + 'case` ekak danna.' }, { quoted: msg });
+    break;
+}
+
+case 'getcase': {
+    if (!(config.OWNER_NUMBERS || []).includes(senderNumber)) break;
+    const gn = (args[0] || '').toLowerCase().replace(/^[^a-z0-9]+/, '');
+    const got = customCases.get(gn);
+    await socket.sendMessage(sender, { text: got ? `🧩 *${gn}*\n\n${'ca' + 'se'} '${gn}':\n${got.code}` : `❌ \`${gn || '?'}\` kiyala custom case ekak naha.` }, { quoted: msg });
     break;
 }
 
