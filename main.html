@@ -112,6 +112,7 @@ h1 .em{display:inline-block;animation:wig 1.4s 3.4s ease both}@keyframes wig{0%,
 .toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:var(--paper);color:var(--ink);padding:12px 20px;border-radius:12px;font-weight:700;opacity:0;pointer-events:none;transition:.2s;z-index:120}.toast.on{opacity:1;transform:translate(-50%,0)}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.rv{opacity:1;transform:none}#intro{display:none}}
 .plans{display:grid;gap:10px;grid-template-columns:1fr 1fr;margin-top:8px}.pl{position:relative;cursor:pointer}.pl input{position:absolute;opacity:0}.pl span{display:block;height:100%;border:2px solid var(--line);border-radius:14px;padding:12px;background:var(--ink);transition:border-color .2s,box-shadow .2s}.pl b{display:block;font-size:15px}.pl small{display:block;margin-top:4px;color:var(--mut);font-size:12px;line-height:1.4}.pl input:checked+span{border-color:var(--amb);box-shadow:0 0 0 3px rgba(255,176,32,.15)}.pl input:focus-visible+span{outline:2px solid var(--teal)}@media(max-width:480px){.plans{grid-template-columns:1fr}}
+.st{margin-top:14px;padding:12px 14px;border-radius:14px;background:var(--ink);border:1px solid var(--line);font-size:14px;color:var(--mut)}.st.ok{border-color:var(--teal);color:var(--teal)}.cmp,.faq details{margin-top:14px;border:1px solid var(--line);border-radius:14px;background:var(--ink);padding:10px 14px}.cmp summary,.faq summary{cursor:pointer;font-weight:600}.cmp table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}.cmp td,.cmp th{padding:7px 4px;border-top:1px solid var(--line);text-align:left}.cmp th{color:var(--mut);font-weight:500}.faq{margin-top:28px}.faq p{color:var(--mut);font-size:14px;margin-top:8px;line-height:1.5}
 </style>
 </head>
 <body>
@@ -181,18 +182,19 @@ h1 .em{display:inline-block;animation:wig 1.4s 3.4s ease both}@keyframes wig{0%,
   <div class="split">
     <section class="box"><h2>📱 Your WhatsApp number</h2>
       <div class="fld" style="margin-top:8px"><label>Choose your bot</label><div class="plans"><label class="pl"><input type="radio" name="plan" value="free" checked><span><b>🆓 Free Bot</b><small>4 movies per day (all commands together). Connects instantly.</small></span></label><label class="pl"><input type="radio" name="plan" value="pro"><span><b>💎 Pro Bot</b><small>Unlimited. Owner verification needed after pairing.</small></span></label></div></div>
+      <details class="cmp"><summary>Compare Free vs Pro</summary><table><tr><th></th><th>🆓 Free</th><th>💎 Pro</th></tr><tr><td>Movies per day</td><td>4</td><td>Unlimited</td></tr><tr><td>Setup</td><td>Instant</td><td>After owner verification</td></tr><tr><td>Songs, tools, settings</td><td>Yes</td><td>Yes</td></tr><tr><td>Button mode</td><td>No</td><td>Yes</td></tr></table></details>
       <div class="fld"><label for="phone">Number with country code</label><input class="inp" id="phone" type="tel" inputmode="numeric" maxlength="15" autocomplete="tel" placeholder="94768069800"><p class="hint">Digits only. No plus sign, no spaces.</p></div>
       <label class="chk"><input type="checkbox" id="terms" checked><span>I understand this links a WhatsApp account to the bot. I will use a secondary number if I can.</span></label>
       <button class="btn pri" id="go">✨ Get pair code</button>
       <div class="err" id="err" role="alert" hidden></div>
       <div class="tk" id="tk" aria-live="polite"><div class="tt"><span>🎟️ ADMIT ONE</span><small>SHAGGY XMD v4</small></div><div class="perf"></div><div class="code" id="code"></div><p class="tm" id="tm"></p><button class="btn" id="copy">📋 Copy code</button></div>
-      <p class="aft" id="aft" hidden>Linked? Send <b>.set</b> to your bot to see its settings. Commands need an active subscription: <a href="https://wa.me/94784224161" target="_blank" rel="noopener" style="color:var(--amb)">message the owner</a>.</p>
+      <div class="st" id="st" role="status" aria-live="polite" hidden></div> <p class="aft" id="aft" hidden>Linked? Send <b>.set</b> to your bot to see its settings. Commands need an active subscription: <a href="https://wa.me/94784224161" target="_blank" rel="noopener" style="color:var(--amb)">message the owner</a>.</p>
     </section>
     <section class="box"><h2>📲 Enter the code in WhatsApp</h2>
       <ol class="how" style="margin-top:8px"><li>Open WhatsApp on the phone that has this number.</li><li>Go to Settings, then Linked devices.</li><li>Tap Link a device, then Link with phone number instead.</li><li>Type the 8 character code. It expires quickly, so open WhatsApp first.</li><li>Wait for the welcome message, then send .menu 🎉</li></ol>
     </section>
   </div>
-</div></main>
+<section class="faq"><h2>❓ Quick answers</h2><details><summary>The code is not accepted</summary><p>Codes last about a minute. Tap Get pair code for a new one, then open WhatsApp, Linked devices, Link with phone number instead.</p></details><details><summary>What is the free limit?</summary><p>4 movies per day across all movie commands. It resets at 12:00 AM Sri Lanka time. Send .limit to see what is left.</p></details><details><summary>What does Pro give me?</summary><p>Unlimited movies. After you pair, the owner verifies your number and the bot starts working.</p></details><details><summary>I linked it but the bot does not reply</summary><p>Wait a few seconds and send .menu. On the Pro bot, replies start after the owner verifies you.</p></details><details><summary>Is it safe to link my number?</summary><p>Use a secondary number if you can. You can unlink any time from Linked devices in WhatsApp.</p></details></section></div></main>
 
 <footer class="foot"><div class="w"><span>⚡ SHAGGY XMD v4. Powered by Shaggy Tech.</span><span>Need a subscription? <a href="https://wa.me/94784224161" target="_blank" rel="noopener">Message the owner</a></span></div></footer>
 <div class="toast" id="toast" role="status"></div>
@@ -240,12 +242,21 @@ function fmt(c){return /^[A-Za-z0-9]{8}$/.test(c)?c.slice(0,4)+'-'+c.slice(4):c}
 function copy(q){var r=$('code').dataset.raw;if(!r)return;function ok(){toast('📋 Code copied')}function bad(){q||toast('Copy failed, select the code by hand')}
  if(navigator.clipboard&&isSecureContext)navigator.clipboard.writeText(r).then(ok,bad);else{var a=document.createElement('textarea');a.value=r;a.style.cssText='position:fixed;opacity:0';document.body.appendChild(a);a.select();try{document.execCommand('copy');ok()}catch(e){bad()}document.body.removeChild(a)}}
 $('copy').addEventListener('click',function(){copy(false)});
-$('go').addEventListener('click',function(){err('');var n=ph.value.trim();
+var tmr,pol;function stopTrack(){clearInterval(tmr);clearInterval(pol)}
+function waLink(n){return 'https://wa.me/94784224161?text='+encodeURIComponent('Hi, I paired the Pro bot with number '+n+'. Please verify me.')}
+function track(n,pl){stopTrack();var left=60,st=$('st');st.hidden=false;st.className='st';st.textContent='⏳ Waiting for you to enter the code in WhatsApp...';
+ function tick(){if(left>0){$('tm').textContent='Type this in WhatsApp under Linked devices. Expires in about '+left+'s.';left--}else{clearInterval(tmr);$('tm').textContent='The code may have expired. Tap Get pair code for a new one.'}}
+ tick();tmr=setInterval(tick,1000);var tries=0;
+ pol=setInterval(function(){if(++tries>60){clearInterval(pol);return}
+  fetch('/code/connected?number='+encodeURIComponent(n)).then(function(r){return r.json()}).then(function(d){
+   if(d&&d.connected){stopTrack();st.className='st ok';st.textContent=pl==='pro'?'✅ Connected! Now request verification with the button below.':'✅ Connected! Your free bot is ready. Send .menu in WhatsApp.';$('tm').textContent='';burst(20,$('tk'))}
+  }).catch(function(){})},3000)}
+$('go').addEventListener('click',function(){err('');stopTrack();$('st').hidden=true;var n=ph.value.trim();
  if(!$('terms').checked){err('Tick the box to continue.');return}
  if(n.length<9){err('Enter your full number with country code, for example 94768069800.');ph.focus();return}
  var pl=(document.querySelector('input[name=plan]:checked')||{}).value||'free';var b=$('go'),k=$('tk'),c=$('code');b.disabled=true;b.textContent='⏳ Requesting code...';k.classList.add('on');c.className='code ld';c.textContent='Generating your code...';$('tm').textContent='';$('aft').hidden=true;
  fetch('/code?number='+encodeURIComponent(n)+'&type='+pl).then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d}})}).then(function(x){
-  if(x.ok&&x.d.code){c.className='code';c.textContent=fmt(x.d.code);c.dataset.raw=x.d.code;$('tm').textContent='Type this in WhatsApp under Linked devices.';$('aft').innerHTML=pl==='pro'?'Linked? You will get a <b>verification note</b> in WhatsApp. Pro commands start working once the owner verifies you: <a href="https://wa.me/94784224161" target="_blank" rel="noopener" style="color:var(--amb)">message the owner</a>.':'Linked? Free bot is ready right away. You can get <b>4 movies per day</b>. Send <b>.menu</b> to start, or <b>.limit</b> to see what is left.';$('aft').hidden=false;copy(true);burst(14,k)}
+  if(x.ok&&x.d.code){c.className='code';c.textContent=fmt(x.d.code);c.dataset.raw=x.d.code;$('tm').textContent='Type this in WhatsApp under Linked devices.';$('aft').innerHTML=pl==='pro'?'Linked? You will get a <b>verification note</b> in WhatsApp. Pro commands start working once the owner verifies you: <br><a class="btn pri" style="display:inline-block;margin-top:8px" href="'+waLink(n)+'" target="_blank" rel="noopener">💬 Request verification</a>':'Linked? Free bot is ready right away. You can get <b>4 movies per day</b>. Send <b>.menu</b> to start, or <b>.limit</b> to see what is left.';$('aft').hidden=false;copy(true);burst(14,k);track(n,pl)}
   else{k.classList.remove('on');err((x.d&&x.d.error)||'The server could not create a code. Try again in a minute.')}
  }).catch(function(){k.classList.remove('on');err('Could not reach the server. Check your connection and try again.')}).finally(function(){b.disabled=false;b.textContent='✨ Get pair code'})});
 /* intro */
