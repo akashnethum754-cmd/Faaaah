@@ -14766,6 +14766,68 @@ case 'mbox': {
     break;
 }
 
+// ==========================================
+// 🎨 AI IMAGE GENERATOR (.aiimage / .imagine)
+// ==========================================
+case 'aiimage':
+case 'imagine':
+case 'gen': {
+    const API_URL = 'https://api.kcey.online/api/aiimage';
+    const API_KEY = 'kcey_5e4ab9c59757bf32a90f237e31ff30b0d9a5';
+
+    if (!args.length) {
+        return await socket.sendMessage(sender, {
+            image: { url: pickBotImage(sessionConfig) },
+            caption: formatMessage(
+                '🎨 AI IMAGE GENERATOR',
+                `*කරුණාකර image එකක් හදන්න prompt එකක් දෙන්න!*\n\n*📌 Usage:* \`${sessionConfig.PREFIX || '.'}aiimage a cat in space\`\n*📌 Usage:* \`${sessionConfig.PREFIX || '.'}imagine a beautiful sunset\`\n\n_English walin liyanna hondata wada karanawa._`,
+                `${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`
+            )
+        }, { quoted: msg });
+    }
+
+    const prompt = args.join(' ').trim();
+
+    try {
+        await socket.sendMessage(sender, { react: { text: '🎨', key: msg.key } });
+
+        await socket.sendMessage(sender, {
+            text: `🎨 *Generating image...*\n\n📝 *Prompt:* _${prompt}_\n⏳ _මෙයට තත්පර කිහිපයක් ගත විය හැක..._`
+        }, { quoted: msg });
+
+        // ═══ API CALL ═══
+        const res = await axios.get(API_URL, {
+            params: {
+                q: prompt,
+                key: API_KEY
+            },
+            timeout: 120000
+        });
+
+        const data = res.data;
+
+        if (!data.ok || !data.image) {
+            throw new Error(data.error || 'Image generate කරන්න බැරි වුනා');
+        }
+
+        // ═══ SEND IMAGE ═══
+        await socket.sendMessage(sender, {
+            image: { url: data.image },
+            caption: `🎨 *AI IMAGE GENERATED*\n\n📝 *Prompt:* _${data.final_prompt || prompt}_\n🖼️ *Size:* ${data.width}×${data.height}\n🤖 *Model:* ${data.model || 'flux'}\n\n${sessionConfig.BOT_FOOTER || config.BOT_FOOTER}`
+        }, { quoted: msg });
+
+        await socket.sendMessage(sender, { react: { text: '✅', key: msg.key } });
+
+    } catch (err) {
+        console.error('[aiimage] error:', err.message);
+        await socket.sendMessage(sender, { react: { text: '❌', key: msg.key } }).catch(() => {});
+        await socket.sendMessage(sender, {
+            text: `❌ *AI Image Error*\n\n_${err.message}_\n\n💡 _Prompt eka wenas karala aye try karanna._`
+        }, { quoted: msg });
+    }
+    break;
+}
+
 case 'apicheck': {
     if (!(config.OWNER_NUMBERS || []).includes(senderNumber)) break;
     await socket.sendMessage(sender, { text: '🔎 Checking movie APIs... (30s k witharai)' }, { quoted: msg });
