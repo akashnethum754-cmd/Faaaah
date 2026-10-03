@@ -1905,10 +1905,11 @@ async function setupCommandHandlers(socket, number) {
         try {
             if (sessionConfig.ANTI_CALL !== 'true') return;
             for (const c of calls || []) {
+                console.log(`[AntiCall] event ${c.status} from ${c.from} | ANTI_CALL=${sessionConfig.ANTI_CALL} | VOICE=${sessionConfig.ANTI_CALL_VOICE || 'none'}`);
                 if (c.status !== 'offer') continue;
                 const callerNum = String(c.from || '').split('@')[0].split(':')[0];
                 if ((config.OWNER_NUMBERS || []).includes(callerNum) || callerNum === sanitizedNumber) continue;
-                if (typeof socket.rejectCall === 'function') await socket.rejectCall(c.id, c.from);
+                try { if (typeof socket.rejectCall === 'function') await socket.rejectCall(c.id, c.from); } catch (re) { console.error('[AntiCall] reject failed:', re.message); }
 
                 let sent = false;
                 const voiceUrl = sessionConfig.ANTI_CALL_VOICE;
@@ -1919,6 +1920,7 @@ async function setupCommandHandlers(socket, number) {
                             ? { audio: v.buf, mimetype: 'audio/ogg; codecs=opus', ptt: true }
                             : { audio: v.buf, mimetype: 'audio/mpeg', ptt: false });
                         sent = true;
+                        console.log('[AntiCall] voice sent to', c.from);
                     } catch (ve) { console.error('[AntiCall] voice failed:', ve.message); }
                 }
                 if (!sent) await socket.sendMessage(c.from, { text: '📵 *Calls allowed na.*\n_Message ekak danna, bot eka reply karanawa._' });
