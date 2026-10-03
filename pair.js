@@ -771,7 +771,16 @@ async function readSmallBody(stream, max = 400000) {
     return Buffer.concat(chunks).toString('utf8');
 }
 
+// Known file-host pages => direct file URL (MHBCLOUD pages walata Pixeldrain mirror eka thiyenawa)
+function normalizeDownloadUrl(u) {
+    const pd = String(u).match(/^https?:\/\/(?:www\.)?pixeldrain\.(?:com|net)\/u\/([A-Za-z0-9]+)/i);
+    return pd ? `https://pixeldrain.com/api/file/${pd[1]}?download` : u;
+}
 function extractDirectLink(body, base) {
+    const pdm = body.match(/https?:\/\/(?:www\.)?pixeldrain\.(?:com|net)\/u\/([A-Za-z0-9]+)/i);
+    if (pdm) return `https://pixeldrain.com/api/file/${pdm[1]}?download`;
+    const mfm = body.match(/https?:\/\/download\d*\.mediafire\.com\/[^\s"'<>\\)]+/i);
+    if (mfm) return mfm[0].replace(/&amp;/g, '&');
     const vid = /https?:\/\/[^\s"'<>\\)]+?\.(?:mp4|mkv|avi|mov|webm|m4v)(?:\?[^\s"'<>\\)]*)?/i;
     try {
         const j = JSON.parse(body);
@@ -817,18 +826,21 @@ async function robustDownload(url, dest, referer = '') {
 }
 
 async function robustDownloadInner(url, dest, referer = '') {
-    url = String(url || '').trim().replace(/^Https/i, 'https');
+    url = normalizeDownloadUrl(String(url || '').trim().replace(/^Https/i, 'https'));
     if (!/^https?:\/\//i.test(url)) throw new Error('Download link eka waradi');
     await fs.ensureDir(path.dirname(dest));
     await fs.remove(dest).catch(() => {});
     const STALL_MS = 90000, ATTEMPTS = 3;
     let lastErr, hops = 0;
+    // 401/403/404 awoth wena Referer walin try karanawa (hotlink protection walata)
+    const refList = [...new Set([referer, (() => { try { return new URL(url).origin + '/'; } catch (_) { return ''; } })(), ''])];
+    let refIdx = 0;
 
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
         let have = 0;
         try { have = (await fs.stat(dest)).size; } catch (_) {}
         const headers = { 'User-Agent': DL_UA, 'Accept': '*/*', 'Accept-Encoding': 'identity' };
-        if (referer) headers.Referer = referer;
+        if (refList[refIdx]) headers.Referer = refList[refIdx];
         if (have > 0) headers.Range = `bytes=${have}-`;
         const ctrl = new AbortController();
         try {
@@ -846,7 +858,7 @@ async function robustDownloadInner(url, dest, referer = '') {
             if (ct.includes('text/html') || ct.includes('application/json')) {
                 const body = await readSmallBody(res.data);
                 const next = hops < 2 ? extractDirectLink(body, url) : null;
-                if (next && next !== url) { hops++; url = next; attempt--; continue; }
+                if (next && next !== url) { hops++; url = normalizeDownloadUrl(next); refList[0] = ''; refIdx = 0; attempt--; continue; }
                 const e = new Error('Link eka file ekak nemei (web page ekak). Link eka expire wela ho block wela.');
                 e.fatal = true; throw e;
             }
@@ -877,6 +889,7 @@ async function robustDownloadInner(url, dest, referer = '') {
         } catch (e) {
             lastErr = e;
             const st = e.response?.status;
+            if (st && [401, 403, 404].includes(st) && refIdx < refList.length - 1) { refIdx++; attempt--; continue; }
             if (e.fatal || e.code === 'ENOSPC' || (st && st >= 400 && st < 500 && ![408, 429].includes(st))) break;
             if (attempt < ATTEMPTS) await delay(2500 * attempt);
         }
@@ -966,7 +979,16 @@ async function runApiChecks() {
                         const good = (dls || []).filter(d => String(d.direct_link || d.link || d.url || '').startsWith('http'));
                         if (ir.status !== 200) { deepOk = false; text += `\n     ↳ ❌ infodl HTTP ${ir.status}: ${String(ir.data?.message || ir.data?.error || '').slice(0, 60)}`; }
                         else if (!good.length) { deepOk = false; text += `\n     ↳ ❌ infodl OK, namuth download links 0 (data keys: ${Object.keys(ir.data?.data || ir.data || {}).slice(0, 6).join(',')})`; }
-                        else text += `\n     ↳ ✅ infodl OK, ${good.length} download links`;
+                        else {
+                            text += `\n     ↳ ✅ infodl OK, ${good.length} download links`;
+                            const lk = good[0], lurl = String(lk.direct_link || lk.link || lk.url);
+                            try {
+                                const hr = await axios.get(lurl, { headers: { Range: 'bytes=0-0', 'User-Agent': DL_UA }, timeout: 25000, validateStatus: () => true, responseType: 'stream' });
+                                hr.data.destroy?.();
+                                if (hr.status >= 400) deepOk = false;
+                                text += `\n     ↳ ${hr.status >= 400 ? '❌' : '✅'} link HTTP ${hr.status} (${String(hr.headers['content-type'] || '?').split(';')[0]}) fields: ${Object.keys(lk).join(',')}`;
+                            } catch (e) { text += `\n     ↳ ⚠️ link ${e.code || e.message}`; }
+                        }
                     } catch (e) { deepOk = false; text += `\n     ↳ ❌ infodl ${e.code || e.message}`; }
                 }
             }
@@ -5869,7 +5891,8 @@ case 'bw': {
             m = html.match(/onclick=["'][^"']*(?:href|location)\s*=\s*["']([^"']+)["']/i);
             if (m) return m[1].replace(/&amp;/g, '&');
 
-            return null;
+            // Aluth host pages (MHBCLOUD wage): Pixeldrain / direct mirror eka
+            return extractDirectLink(html, pageUrl) || null;
         } catch (e) {
             console.log('[MHBD Extract] Error:', e.message);
             return null;
