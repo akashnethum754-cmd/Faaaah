@@ -170,64 +170,12 @@ const downloadGdriveFile = async (url, dest) => {
 
 // ⭐ Direct download (non-GDrive)
 const downloadDirect = async (url, dest) => {
-    await fs.ensureDir(path.dirname(dest));
-    const STALL_MS = 120000; // 2 min: data enne nathi unoth download eka nawaththanawa
-    const controller = new AbortController();
-    const res = await axios({
-        url,
-        method: 'GET',
-        responseType: 'stream',
-        timeout: 120000,          // connect / first byte ekata 2 min
-        signal: controller.signal,
-        maxRedirects: 10,
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity,
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': '*/*'
-        }
-    });
-
-    const ct = (res.headers['content-type'] || '').toLowerCase();
-    if (ct.includes('text/html')) {
-        res.data.destroy();
-        throw new Error('HTML response (not a file)');
-    }
-
-    const writer = fs.createWriteStream(dest);
-    let stallTimer = null;
-    const armStall = () => {
-        clearTimeout(stallTimer);
-        stallTimer = setTimeout(() => {
-            controller.abort();
-            res.data.destroy(new Error('Download stalled (2 min data nathi)'));
-        }, STALL_MS);
-    };
-    armStall();
-    res.data.on('data', armStall);
-
-    try {
-        res.data.pipe(writer);
-        await new Promise((resolve, reject) => {
-            writer.on('finish', resolve);
-            writer.on('error', reject);
-            res.data.on('error', reject);
-            res.data.on('aborted', () => reject(new Error('Download aborted')));
-        });
-    } catch (e) {
-        writer.destroy();
-        await fs.remove(dest).catch(() => {});
-        throw e;
-    } finally {
-        clearTimeout(stallTimer);
-    }
-
+    await robustDownload(url, dest, '');      // multi-connection + resume + host-page resolver
     const stats = await fs.stat(dest);
     if (stats.size < 1024 * 100) {
         await fs.remove(dest).catch(() => {});
         throw new Error(`File too small: ${(stats.size / 1024).toFixed(1)} KB`);
     }
-
     return { success: true, size: stats.size };
 };
 
@@ -801,6 +749,82 @@ function extractDirectLink(body, base) {
     return m ? m[0] : null;
 }
 
+const PAR_MIN_BYTES = 24 * 1024 * 1024;   // me size ekata wada podi files single connection
+let DL_CONN = Math.min(16, Math.max(1, parseInt(process.env.DL_CONNECTIONS || '6', 10)));
+
+// File eka N ksha (Range) walata kadala eka welawema download karanawa => host eke per-connection speed limit eka bypass wenawa
+async function parallelFill(url, dest, baseHeaders, firstRes, firstCtrl, total, n) {
+    const t0 = Date.now();
+    const segSize = Math.ceil(total / n);
+    const segs = [];
+    for (let i = 0; i < n; i++) { const start = i * segSize, end = Math.min(total - 1, start + segSize - 1); if (start <= end) segs.push({ start, end }); }
+    { const fd = await fs.open(dest, 'w'); await fs.ftruncate(fd, total); await fs.close(fd); }
+    const active = new Set();
+    let failed = null;
+    const abortAll = () => { for (const a of active) { try { a.ctrl.abort(); a.resp?.data?.destroy(); } catch (_) {} } };
+
+    const runSeg = async (seg, firstResponse, firstController) => {
+        let pos = seg.start;
+        for (let attempt = 1; attempt <= 4; attempt++) {
+            if (failed) throw failed;
+            let resp = firstResponse;
+            const handle = { ctrl: firstController || new AbortController(), resp: null };
+            firstResponse = null; firstController = null;
+            active.add(handle);
+            const writer = fs.createWriteStream(dest, { flags: 'r+', start: pos });
+            const need = seg.end - pos + 1;
+            let got = 0;
+            try {
+                if (!resp) {
+                    resp = await axios({
+                        url, method: 'GET', responseType: 'stream', timeout: 60000, signal: handle.ctrl.signal, maxRedirects: 10,
+                        maxContentLength: Infinity, maxBodyLength: Infinity, headers: { ...baseHeaders, Range: `bytes=${pos}-${seg.end}` },
+                        validateStatus: (st) => st === 206 || st === 200, __retry: 1
+                    });
+                    if (resp.status !== 206) { resp.data.destroy(); throw Object.assign(new Error('Server Range support na'), { noRange: true }); }
+                }
+                handle.resp = resp;
+                await new Promise((resolve, reject) => {
+                    let stall, over = false;
+                    const end = (err) => { if (over) return; over = true; clearTimeout(stall); err ? reject(err) : resolve(); };
+                    const arm = () => { clearTimeout(stall); stall = setTimeout(() => { handle.ctrl.abort(); resp.data.destroy(); end(new Error('segment stalled')); }, 45000); };
+                    arm();
+                    writer.on('error', end);
+                    writer.on('finish', () => end());
+                    resp.data.on('error', (e) => { if (got < need) end(e); });
+                    resp.data.on('end', () => { if (got < need) end(new Error('segment ended early')); });
+                    resp.data.on('data', (chunk) => {
+                        arm();
+                        const remain = need - got;
+                        if (remain <= 0) return;
+                        const piece = chunk.length > remain ? chunk.subarray(0, remain) : chunk;
+                        got += piece.length;
+                        if (!writer.write(piece)) { resp.data.pause(); writer.once('drain', () => resp.data.resume()); }
+                        if (got >= need) { resp.data.destroy(); writer.end(); }
+                    });
+                });
+                if (got < need) throw new Error('segment short');
+                active.delete(handle);
+                return;
+            } catch (e) {
+                active.delete(handle);
+                try { resp?.data?.destroy(); } catch (_) {}
+                writer.destroy();
+                if (failed) throw failed;
+                if (e.noRange || attempt === 4) { failed = e; abortAll(); throw e; }
+                pos += writer.bytesWritten;                 // flush una thanin patan ganna
+                await delay(800 * attempt);
+            }
+        }
+    };
+
+    const results = await Promise.allSettled(segs.map((sg, i) => runSeg(sg, i === 0 ? firstRes : null, i === 0 ? firstCtrl : null)));
+    const bad = results.find((r) => r.status === 'rejected');
+    if (bad) { abortAll(); throw failed || bad.reason; }
+    const sec = Math.max(0.1, (Date.now() - t0) / 1000);
+    console.log(`[DL] ${(total / 1048576).toFixed(0)}MB in ${sec.toFixed(1)}s (${(total / 1048576 / sec).toFixed(1)} MB/s, ${segs.length} connections)`);
+}
+
 let MAX_PARALLEL_DL = Math.max(1, parseInt(process.env.MAX_PARALLEL_DOWNLOADS || '3', 10));
 let MIN_FREE_DISK = (parseFloat(process.env.MIN_FREE_DISK_GB || '1.2')) * 1024 ** 3;
 const dlGate = { active: 0, queue: [] };
@@ -831,7 +855,7 @@ async function robustDownloadInner(url, dest, referer = '') {
     await fs.ensureDir(path.dirname(dest));
     await fs.remove(dest).catch(() => {});
     const STALL_MS = 90000, ATTEMPTS = 3;
-    let lastErr, hops = 0;
+    let lastErr, hops = 0, parOff = false;
     // 401/403/404 awoth wena Referer walin try karanawa (hotlink protection walata)
     const refList = [...new Set([referer, (() => { try { return new URL(url).origin + '/'; } catch (_) { return ''; } })(), ''])];
     let refIdx = 0;
@@ -842,6 +866,8 @@ async function robustDownloadInner(url, dest, referer = '') {
         const headers = { 'User-Agent': DL_UA, 'Accept': '*/*', 'Accept-Encoding': 'identity' };
         if (refList[refIdx]) headers.Referer = refList[refIdx];
         if (have > 0) headers.Range = `bytes=${have}-`;
+        const wantPar = DL_CONN > 1 && have === 0 && !parOff;
+        if (wantPar) headers.Range = 'bytes=0-';          // 1 weni request eka probe + segment 0
         const ctrl = new AbortController();
         try {
             const res = await axios({
@@ -861,6 +887,20 @@ async function robustDownloadInner(url, dest, referer = '') {
                 if (next && next !== url) { hops++; url = normalizeDownloadUrl(next); refList[0] = ''; refIdx = 0; attempt--; continue; }
                 const e = new Error('Link eka file ekak nemei (web page ekak). Link eka expire wela ho block wela.');
                 e.fatal = true; throw e;
+            }
+            if (wantPar && res.status === 206) {
+                const crm = String(res.headers['content-range'] || '').match(/\/(\d+)\s*$/);
+                const totalBytes = crm ? parseInt(crm[1], 10) : 0;
+                if (totalBytes >= PAR_MIN_BYTES) {
+                    try {
+                        await parallelFill(url, dest, headers, res, ctrl, totalBytes, DL_CONN);
+                        return;
+                    } catch (pe) {
+                        console.error('[DL] parallel failed -> single stream:', pe.message);
+                        await fs.remove(dest).catch(() => {});
+                        parOff = true; attempt--; continue;
+                    }
+                }
             }
             const resume = have > 0 && res.status === 206;
             const total = (parseInt(res.headers['content-length'] || '0', 10) || 0) + (resume ? have : 0);
@@ -913,7 +953,8 @@ axios.defaults.headers.common['Accept'] = 'application/json, text/plain, */*';
 axios.interceptors.response.use((r) => r, async (e) => {
     const cfg = e.config;
     const status = e.response?.status;
-    const retryable = !status || [408, 425, 429, 500, 502, 503, 504, 522, 524].includes(status);
+    const netErr = !status && !['ECONNABORTED', 'ETIMEDOUT'].includes(e.code);
+    const retryable = netErr || [429, 500, 502, 503, 504, 522, 524].includes(status);
     if (cfg && String(cfg.method).toLowerCase() === 'get' && retryable && (cfg.__retry || 0) < 2 && !axios.isCancel(e)) {
         cfg.__retry = (cfg.__retry || 0) + 1;
         await new Promise((r) => setTimeout(r, 1500 * cfg.__retry));
@@ -1169,12 +1210,14 @@ function applyGlobalSettings(g) {
     if (!g) return;
     if (g.FREE_LIMIT) config.FREE_DAILY_LIMIT = g.FREE_LIMIT;
     if (g.MAX_DL) { MAX_PARALLEL_DL = g.MAX_DL; releaseDlQueue(); }
+    if (g.DL_CONN) DL_CONN = g.DL_CONN;
     if (g.MIN_DISK_GB !== undefined) MIN_FREE_DISK = g.MIN_DISK_GB * 1024 ** 3;
 }
 async function applyAndSaveGlobal(upd) {
     const g = {};
     if (upd.FREE_LIMIT !== undefined) g.FREE_LIMIT = upd.FREE_LIMIT;
     if (upd.MAX_DL !== undefined) g.MAX_DL = upd.MAX_DL;
+    if (upd.DL_CONN !== undefined) g.DL_CONN = upd.DL_CONN;
     if (upd.MIN_DISK_GB !== undefined) g.MIN_DISK_GB = upd.MIN_DISK_GB;
     if (Object.keys(g).length) {
         applyGlobalSettings(g);
@@ -2097,6 +2140,7 @@ async function setupCommandHandlers(socket, number) {
                 return;
             }
         }
+        if (MOVIE_COMMANDS.has(command)) socket.sendMessage(sender, { react: { text: '⏳', key: msg.key } }).catch(() => {});   // ikmanata ack
 
         const groupMetadata = isGroup ? await socket.groupMetadata(msg.key.remoteJid) : {};
         const participants = groupMetadata.participants || [];
@@ -14967,7 +15011,7 @@ case 'setting': {
         'ANTI_CALL', 'ANTI_LINK', 'WELCOME', 'WELCOME_MSG', 'AWAY', 'AWAY_MSG', 'COOLDOWN'
     ];
     const BOOL_KEYS = ['AUTO_RECORDING', 'AUTO_TYPING', 'ALWAYS_ONLINE', 'ALWAYS_MSG_SEEN', 'STATUS_VIEW', 'AUTO_LIKE', 'ANTI_DELETE', 'BUTTON_MODE', 'ANTI_CALL', 'WELCOME', 'AWAY'];
-    const GLOBAL_KEYS = ['MAINTENANCE', 'MAINTENANCE_MSG', 'FREE_LIMIT', 'MAX_DL', 'MIN_DISK_GB'];
+    const GLOBAL_KEYS = ['MAINTENANCE', 'MAINTENANCE_MSG', 'FREE_LIMIT', 'MAX_DL', 'MIN_DISK_GB', 'DL_CONN'];
     const parseBool = (x) => {
         const lv = String(x).toLowerCase();
         if (['true', 'on', 'yes', '1'].includes(lv)) return 'true';
@@ -15016,6 +15060,7 @@ ${buttonAllowed() ? on('BUTTON_MODE') : '🔒'} BUTTON_MODE`;
 ${runtimeState.maintenance ? '✅' : '❌'} MAINTENANCE  (${short(runtimeState.maintenanceMsg || 'default')})
 🎬 FREE_LIMIT: ${config.FREE_DAILY_LIMIT} movies/day
 ⬇️ MAX_DL: ${MAX_PARALLEL_DL} parallel downloads
+🚀 DL_CONN: ${DL_CONN} connections per download
 💽 MIN_DISK_GB: ${(MIN_FREE_DISK / 1024 ** 3).toFixed(1)}`;
         }
         dash += `
@@ -15032,7 +15077,7 @@ ${runtimeState.maintenance ? '✅' : '❌'} MAINTENANCE  (${short(runtimeState.m
 *Text:* BOT_NAME, BOT_FOOTER, MOVIE_FOOTER, MOVIE_CAPTION, WELCOME_MSG, AWAY_MSG, BOT_IMAGE (link)
 _WELCOME_MSG eke_ {user} {group} {count} _use karanna puluwan._
 *CSONG_AUDIO:* voice / audio / file${isMasterSender ? `
-*Global:* MAINTENANCE on/off, MAINTENANCE_MSG, FREE_LIMIT 1-100, MAX_DL 1-10, MIN_DISK_GB 0-100` : ''}
+*Global:* MAINTENANCE on/off, MAINTENANCE_MSG, FREE_LIMIT 1-100, MAX_DL 1-10, MIN_DISK_GB 0-100, DL_CONN 1-16 (download speed)` : ''}
 _Wenas kirim ikmanata apply wenawa._`;
         return await socket.sendMessage(sender, { text: dash }, { quoted: msg });
     }
@@ -15061,7 +15106,7 @@ _Wenas kirim ikmanata apply wenawa._`;
                 globalUpdates.MAINTENANCE_MSG = value.slice(0, 300);
             } else {
                 const n = Number(value);
-                const rng = { FREE_LIMIT: [1, 100, true], MAX_DL: [1, 10, true], MIN_DISK_GB: [0, 100, false] }[key];
+                const rng = { FREE_LIMIT: [1, 100, true], MAX_DL: [1, 10, true], MIN_DISK_GB: [0, 100, false], DL_CONN: [1, 16, true] }[key];
                 if (!Number.isFinite(n) || n < rng[0] || n > rng[1] || (rng[2] && !Number.isInteger(n))) { problem = `\`${key}\` = ${rng[0]} - ${rng[1]}${rng[2] ? ' (whole number)' : ''}`; break; }
                 globalUpdates[key] = n;
             }
