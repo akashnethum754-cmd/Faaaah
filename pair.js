@@ -590,7 +590,7 @@ const config = {
     API_MOVIE_URL: 'https://api-siteh-22e22e4cb068.herokuapp.com',
     API_KEY:'lakiya_2f3b6c382d1236ad7a08d56331fb679935d51dfc846df2c254093fd1fff9494e',
     BOT_IMAGE:'https://files.catbox.moe/wogma6.jpeg',
-    BOT_FOOTER:"SHAGGY XMD 〽️ᴏᴠɪᴇ Bᴏᴛ ᴠ4",
+    BOT_FOOTER:"✦ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 ✦",
     MGROUP_LINK: 'https://chat.whatsapp.com/EeMhcQufXDFABM1MnR05Wh?s=cl&p=a&mlu=4&ilr=4',
     MOVIE_FOOTER:"⏤͟͟͞͞★❮ SHAGGY XMD 〽️OVIE ⏤͟͟͞͞★",
     MOVIE_CAPTION:"🇸‌ʜᴀɢɢY-xᴍᴅ ᴍᴏᴠɪᴇ 🔥🌈",
@@ -1834,10 +1834,240 @@ const BOLD_MAP = (() => {
     return m;
 })();
 const toBold = (t) => String(t).replace(/[A-Za-z0-9]/g, (c) => BOLD_MAP[c] || c);
+// ==========================================
+// ✦ SHAGGY XMD • GLOBAL FOOTER + USERSDRIVE HELPER
+// ==========================================
+const SHAGGY_LINE = '┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈';
+const SHAGGY_FOOTER_SHORT = '> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦';
+const SHAGGY_FOOTER = `\n\n${SHAGGY_LINE}\n${SHAGGY_FOOTER_SHORT}\n> _ᴘᴏᴡᴇʀᴇᴅ ʙʏ ꜱʜᴀɢɢʏ ᴛᴇᴄʜ_`;
+
+const UD_SASA_API = 'https://sasa-dev-api.xyz';
+const UD_SASA_KEY = 'Sasa_Dev_Api_a2b4b132e5a12615bcde330c5a2f070e28c03fce';
+const UD_PART_SIZE_MB = 500;
+const UD_PART_SIZE_BYTES = UD_PART_SIZE_MB * 1024 * 1024;
+const UD_SEND_DELAY_MS = 3 * 60 * 1000;
+const UD_TEMP_DIR = './tmp_usersdrive';
+const UD_MAX_PARTS = 300;
+const UD_LINK_REGEX = /https?:\/\/(?:www\.)?usersdrive\.com\/[^\s]+/i;
+
+function extractUsersDriveLink(text) {
+    return (String(text || '').match(UD_LINK_REGEX) || [])[0] || null;
+}
+
+// UsersDrive link ekak aran: info -> download -> (500MB parts walata kadala) -> WhatsApp ekata yawanawa
+async function shaggyUdDownload(socket, sender, quoted, udLink) {
+    const FOOTER = SHAGGY_FOOTER;
+
+    try {
+        // ═══ FETCH FILE INFO ═══
+        await socket.sendMessage(sender, {
+            text: `╭━━━〔 ⏳ *FETCHING INFO* 〕━━━╮\n┃\n┃ 📁 _UsersDrive file info..._\n┃\n┃  _Please wait..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+        }, { quoted });
+
+        const infoRes = await axios.get(`${UD_SASA_API}/api/usersdrive`, {
+            params: { apikey: UD_SASA_KEY, url: udLink },
+            timeout: 60000
+        });
+
+        const infoData = infoRes.data;
+        const fileInfo = infoData.data || infoData.result || infoData;
+        const fileName = String(fileInfo.name || fileInfo.filename || fileInfo.file_name || 'UsersDrive_File');
+        const fileSize = fileInfo.size || fileInfo.file_size || 'N/A';
+        const directUrl = fileInfo.direct_link || fileInfo.direct_url || fileInfo.direct || fileInfo.download_url || fileInfo.download;
+
+        // extension eka sanitize karanna kalin ganna (mimetype + fileName ekata)
+        const extMatch = fileName.match(/\.([a-zA-Z0-9]{2,5})$/);
+        const ext = extMatch ? extMatch[1].toLowerCase() : '';
+        const baseName = (extMatch ? fileName.slice(0, -extMatch[0].length) : fileName).replace(/[^a-zA-Z0-9 ]/g, '_').substring(0, 45);
+        const safeName = ext ? `${baseName}.${ext}` : baseName;
+
+        let infoText = `╭━━━〔 📁 *USERSDRIVE FILE* 〕━━━╮\n┃\n`;
+        infoText += `┃ 📄 *Name :* ${fileName.substring(0, 35)}\n`;
+        infoText += `┃ 📦 *Size :* ${fileSize}\n`;
+        infoText += `┃ 🔗 *Direct :* ${directUrl ? '✅ Yes' : '❌ No'}\n`;
+        infoText += `┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`;
+
+        if (!directUrl) {
+            return await socket.sendMessage(sender, {
+                text: `╭━━━〔 📁 *USERSDRIVE FILE* 〕━━━╮\n┃\n┃ 📄 *Name :* ${fileName.substring(0, 35)}\n┃ 📦 *Size :* ${fileSize}\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n*🔗 Link :*\n${udLink}\n\n💡 _Direct link eka hamu unae na_\n💡 _Browser eken download karanna_${FOOTER}`
+            }, { quoted });
+        }
+
+        await socket.sendMessage(sender, { text: infoText }, { quoted });
+        if (quoted?.key) await socket.sendMessage(sender, { react: { text: '📥', key: quoted.key } }).catch(() => {});
+
+        // ═══ DOWNLOAD TO SERVER ═══
+        await fs.ensureDir(UD_TEMP_DIR);
+        const rawFile = path.join(UD_TEMP_DIR, `${baseName}_${Date.now()}.bin`);
+
+        await socket.sendMessage(sender, {
+            text: `╭━━━〔 📥 *DOWNLOADING* 〕━━━╮\n┃\n┃ 📄 *${fileName.substring(0, 30)}*\n┃ 📦 *Size :* ${fileSize}\n┃\n┃  _Server ekata download karanawa..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+        }, { quoted });
+
+        try {
+            await robustDownload(directUrl, rawFile, 'https://usersdrive.com/');
+            const stats = await fs.stat(rawFile);
+            const totalSizeMB = stats.size / 1024 / 1024;
+
+            if (totalSizeMB < 0.05) {
+                await fs.remove(rawFile).catch(() => {});
+                throw new Error('File too small (error page)');
+            }
+
+            // ═══ SMALL FILE → SEND DIRECTLY ═══
+            if (stats.size <= UD_PART_SIZE_BYTES) {
+                await socket.sendMessage(sender, {
+                    text: `╭━━━〔 ✅ *DOWNLOADED* 〕━━━╮\n┃\n┃ 📦 *Size :* ${totalSizeMB.toFixed(1)} MB\n┃\n┃  📤 _Sending to WhatsApp..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                }, { quoted });
+
+                const mimeMap = {
+                    mp4: 'video/mp4', mkv: 'video/x-matroska', avi: 'video/x-msvideo',
+                    mp3: 'audio/mpeg', m4a: 'audio/mp4',
+                    zip: 'application/zip', rar: 'application/vnd.rar', '7z': 'application/x-7z-compressed',
+                    pdf: 'application/pdf', apk: 'application/vnd.android.package-archive',
+                    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png'
+                };
+                const mimetype = mimeMap[ext] || 'application/octet-stream';
+
+                try {
+                    await socket.sendMessage(sender, {
+                        document: { url: rawFile },
+                        mimetype,
+                        fileName: safeName,
+                        caption: `╭━━━〔 📁 *USERSDRIVE DL* 〕━━━╮\n┃\n┃ 📄 *Name :* ${safeName}\n┃ 📦 *Size :* ${totalSizeMB.toFixed(1)} MB\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n${SHAGGY_FOOTER_SHORT}`
+                    }, { quoted });
+                    if (quoted?.key) await socket.sendMessage(sender, { react: { text: '✅', key: quoted.key } }).catch(() => {});
+                } catch (sendErr) {
+                    await socket.sendMessage(sender, {
+                        text: `❌ *Send fail:* ${sendErr.message.substring(0, 80)}\n\n🔗 *Direct Link:*\n${directUrl}${FOOTER}`
+                    }, { quoted });
+                }
+
+                await fs.remove(rawFile).catch(() => {});
+                return;
+            }
+
+            // ═══ BIG FILE → SPLIT INTO PARTS ═══
+            const totalParts = Math.ceil(stats.size / UD_PART_SIZE_BYTES);
+
+            await socket.sendMessage(sender, {
+                text: `╭━━━〔 ✂️ *SPLITTING* 〕━━━╮\n┃\n┃ 📦 *Size  :* ${totalSizeMB.toFixed(1)} MB\n┃ 🔪 *Parts :* ${totalParts}\n┃\n┃  _Splitting into ${UD_PART_SIZE_MB}MB parts..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+            }, { quoted });
+
+            const splitDir = path.join(UD_TEMP_DIR, `${baseName}_parts_${Date.now()}`);
+            await fs.ensureDir(splitDir);
+
+            const parts = [];
+            const readStream = fs.createReadStream(rawFile, { highWaterMark: 4 * 1024 * 1024 });
+
+            let currentPart = 0;
+            let currentSize = 0;
+            let writeStream = null;
+            let totalWritten = 0;
+
+            const openPart = () => {
+                const partPath = path.join(splitDir, `${baseName}.part${String(currentPart + 1).padStart(3, '0')}.bin`);
+                writeStream = fs.createWriteStream(partPath);
+                parts.push({ index: currentPart + 1, path: partPath, size: 0 });
+            };
+            openPart();
+
+            for await (const chunk of readStream) {
+                let offset = 0;
+                while (offset < chunk.length) {
+                    const spaceLeft = UD_PART_SIZE_BYTES - currentSize;
+                    const toWrite = Math.min(spaceLeft, chunk.length - offset);
+                    const slice = chunk.subarray(offset, offset + toWrite);
+
+                    if (!writeStream.write(slice)) {
+                        await new Promise((r) => writeStream.once('drain', r));
+                    }
+                    currentSize += toWrite;
+                    totalWritten += toWrite;
+                    parts[parts.length - 1].size += toWrite;
+                    offset += toWrite;
+
+                    if (currentSize >= UD_PART_SIZE_BYTES && totalWritten < stats.size) {
+                        await new Promise((r) => writeStream.end(r));
+                        currentPart++;
+                        currentSize = 0;
+                        if (currentPart < totalParts && currentPart < UD_MAX_PARTS) openPart();
+                    }
+                }
+            }
+            if (writeStream && !writeStream.writableEnded) {
+                await new Promise((r) => writeStream.end(r));
+            }
+            await fs.remove(rawFile).catch(() => {});
+
+            // ═══ SEND PARTS WITH DELAY ═══
+            await socket.sendMessage(sender, {
+                text: `╭━━━〔 📤 *SENDING PARTS* 〕━━━╮\n┃\n┃ 📁 *${baseName.substring(0, 25)}*\n┃ 📦 *Total Parts :* ${parts.length}\n┃ 💾 *Part Size   :* ~${UD_PART_SIZE_MB} MB\n┃ ⏱️ *Delay       :* 3 min\n┃\n┃  _Starting now... Please wait_\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+            }, { quoted });
+
+            let sentCount = 0;
+            let failedCount = 0;
+
+            for (let i = 0; i < parts.length; i++) {
+                const part = parts[i];
+                const partLabel = `Part ${i + 1}/${parts.length}`;
+                const partSizeMB = (part.size / 1024 / 1024).toFixed(1);
+
+                try {
+                    await socket.sendMessage(sender, {
+                        document: { url: part.path },
+                        mimetype: 'application/octet-stream',
+                        fileName: `${baseName}.part${String(i + 1).padStart(3, '0')}`,
+                        caption: `╭━━━〔 📁 *${baseName.substring(0, 20)}* 〕━━━╮\n┃\n┃ 📌 *${partLabel}*\n┃ 📦 *Size :* ${partSizeMB} MB\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n${SHAGGY_FOOTER_SHORT}`
+                    }, { quoted });
+
+                    sentCount++;
+                    await fs.remove(part.path).catch(() => {});
+
+                    if (i < parts.length - 1) {
+                        await socket.sendMessage(sender, {
+                            text: `✅ *${partLabel}* sent!\n⏱️ _Waiting 3 minutes for next part..._`
+                        });
+                        await new Promise((r) => setTimeout(r, UD_SEND_DELAY_MS));
+                    }
+                } catch (sendErr) {
+                    console.error(`[UsersDrive] ${partLabel} send failed:`, sendErr.message);
+                    failedCount++;
+                    await socket.sendMessage(sender, {
+                        text: `❌ *${partLabel}* send failed!\n_${sendErr.message.substring(0, 60)}_`
+                    });
+                }
+            }
+
+            // ═══ COMPLETE ═══
+            await socket.sendMessage(sender, {
+                text: `╭━━━〔 ✅ *COMPLETE* 〕━━━╮\n┃\n┃ 📁 *${baseName.substring(0, 25)}*\n┃ 📤 *Sent   :* ${sentCount} parts\n┃ ❌ *Failed :* ${failedCount} parts\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n💡 *Extract :*\n1. Parts ඔක්කොම එක folder එකකට දාන්න\n2. Part 1 එක WinRAR / 7-Zip එකෙන් open කරන්න\n3. Extract කරන්න\n\n⚠️ _හැම part එකම එකම folder එකේ තියෙන්න ඕනේ_${FOOTER}`
+            }, { quoted });
+
+            await fs.remove(splitDir).catch(() => {});
+
+        } catch (downloadErr) {
+            console.error('[UsersDrive] download error:', downloadErr.message);
+            await socket.sendMessage(sender, {
+                text: `╭━━━〔 ❌ *DOWNLOAD FAILED* 〕━━━╮\n┃\n┃  _${downloadErr.message.substring(0, 100)}_\n┃\n┃ 🔗 *Direct link try කරන්න :*\n┃ ${directUrl}\n┃\n┃ 💡 _IDM / JDownloader use කරන්න_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+            }, { quoted });
+            try { await fs.remove(rawFile); } catch {}
+        }
+
+    } catch (err) {
+        console.error('[UsersDrive] error:', err.message);
+        if (quoted?.key) await socket.sendMessage(sender, { react: { text: '❌', key: quoted.key } }).catch(() => {});
+        await socket.sendMessage(sender, {
+            text: `╭━━━〔 ❌ *ERROR* 〕━━━╮\n┃\n┃  _${err.message.substring(0, 100)}_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+        }, { quoted });
+    }
+}
+
 function formatMessage(title, content, footer) {
     const brand = toBold(String(config.BOT_NAME || 'SHAGGY XMD').toUpperCase());
-    const head = `*❪ ${brand} • ${toBold(String(title || '').replace(/\*/g, '').trim())} ❫*`;
-    const foot = footer ? `\n\n> 🎭 ${footer} 🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 👑 𝗦𝗛𝗔𝗚𝗚𝗬 𝗧𝗘𝗖𝗛` : '';
+    const ttl = toBold(String(title || '').replace(/\*/g, '').trim());
+    const head = `╭━━━〔 *${brand}* 〕━━━╮\n┃ ✦ *${ttl}*\n╰━━━━━━━━━━━━━━━━━━╯`;
+    const foot = footer ? `\n\n${SHAGGY_LINE}\n> ${footer}\n> _ᴘᴏᴡᴇʀᴇᴅ ʙʏ ꜱʜᴀɢɢʏ ᴛᴇᴄʜ_` : '';
     return `${head}\n\n${String(content || '').trim()}${foot}`;
 }
 
@@ -2115,7 +2345,7 @@ async function setupCommandHandlers(socket, number) {
 ┃
 ╰━━━━━━━━━━━━━━━━━━━━╯${body ? `\n\n📩 *Message:*\n${body}` : ''}
 
-> 🎭 *SHAGGY XMD* 🎭`
+> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`
                         });
 
                         // media nam original eka forward karanawa
@@ -3719,6 +3949,8 @@ case 'help': {
                     ['rom', 'Game ROM search & dl'],
                     ['fitgirl', 'FitGirl repacks'],
                     ['fginfo', 'FitGirl game info'],
+                    ['usersdrive', 'UsersDrive downloader (.ud)'],
+                    ['config', 'Channel latest message (.config)'],
                     ['sdl', 'Save status video'],
                     ['vv', 'View-once saver']
                 ]
@@ -4533,7 +4765,7 @@ ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`
 }
 
 case 'tvsend': {
-    const DEFAULT_FOOTER = `\n\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗠𝗢𝗩𝗜𝗘 𝗕𝗢𝗧 🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ʟYɴᴋᴏ`;
+    const DEFAULT_FOOTER = SHAGGY_FOOTER;
 
     if (!isOwner) {
         await socket.sendMessage(sender, { text: '❌ *Owner witharai meka use karanna puluwan.*' }, { quoted: msg });
@@ -4573,7 +4805,7 @@ case 'tvsend': {
 
     const cinesubQuery = gsQuery;
     await socket.sendMessage(sender, { 
-        text: `*❪ SEARCHING ❫*\n\n🔍 *Searching Movies...*\n⚡ _Please wait a moment._`
+        text: `╭━━━〔 *SEARCHING* 〕━━━╮\n\n🔍 *Searching Movies...*\n⚡ _Please wait a moment._`
     });
 
     const API_BASE = CH_BASE;
@@ -4586,13 +4818,13 @@ case 'tvsend': {
 
         if (!searchData.status || !searchData.data || searchData.data.length === 0) {
             await socket.sendMessage(sender, {
-                text: `*❪ NO RESULTS ❫*\n\n😞 *No Results Found!*\n\n🎬 *Query:* _${cinesubQuery}_\n💡 *Tip:* _Please check the spelling and try again!_${DEFAULT_FOOTER}`
+                text: `╭━━━〔 *NO RESULTS* 〕━━━╮\n\n😞 *No Results Found!*\n\n🎬 *Query:* _${cinesubQuery}_\n💡 *Tip:* _Please check the spelling and try again!_${DEFAULT_FOOTER}`
             }, { quoted: msg });
             break;
         }
 
         const cinesubResults = searchData.data.slice(0, 25);
-        let listText = `*❪ SEARCH RESULTS ❫*\n\n🎯 *Query:* _${cinesubQuery}_\n📊 *Results:* _${cinesubResults.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
+        let listText = `╭━━━〔 *SEARCH RESULTS* 〕━━━╮\n\n🎯 *Query:* _${cinesubQuery}_\n📊 *Results:* _${cinesubResults.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
 
         cinesubResults.forEach((item, index) => {
             const typeIcon = item.type === 'tvshows' ? '📺' : '🎥';
@@ -4616,7 +4848,7 @@ case 'tvsend': {
                 const choice = parseInt(messageType) - 1;
                 if (isNaN(choice) || choice < 0 || choice >= cinesubResults.length) {
                     await socket.sendMessage(sender, {
-                        text: `*❪ INVALID ❫*\n\n⚠️ *Wrong Number!*\n🎯 *Range:* _01 - ${cinesubResults.length}_\n📝 _Please reply with a valid number!_${DEFAULT_FOOTER}`
+                        text: `╭━━━〔 *INVALID* 〕━━━╮\n\n⚠️ *Wrong Number!*\n🎯 *Range:* _01 - ${cinesubResults.length}_\n📝 _Please reply with a valid number!_${DEFAULT_FOOTER}`
                     }, { quoted: replyMek });
                     return;
                 }
@@ -4626,7 +4858,7 @@ case 'tvsend': {
 
                 if (isTvShow) {
                     await socket.sendMessage(sender, { 
-                        text: `*❪ FETCHING ❫*\n\n📺 *Fetching TV Series...*\n⚡ _Please wait..._`
+                        text: `╭━━━〔 *FETCHING* 〕━━━╮\n\n📺 *Fetching TV Series...*\n⚡ _Please wait..._`
                     }, { quoted: replyMek });
 
                     try {
@@ -4639,7 +4871,7 @@ case 'tvsend': {
 
                         const tvInfo = tvShowData.data;
 
-                        let tvDetailsText = `*❪ TV SERIES DETAILS ❫*\n\n📺 *${tvInfo.title}*\n⭐ 𝗜ᴍᴅʙ ➜ ★ ${tvInfo.rating || 'N/A'}\n📅 𝗬ᴇᴀʀ ➜ ${tvInfo.year || 'N/A'}\n⏳ 𝗥ᴜɴᴛɪᴍᴇ ➜ ${tvInfo.duration || 'N/A'}\n🌍 𝗖ᴏᴜɴ𝘁𝗿ʏ ➜ ${tvInfo.country || 'N/A'}\n🎭 𝗚𝗲𝗻 genres ➜ ${tvInfo.genres ? tvInfo.genres.join(', ') : 'N/A'}\n🎬 𝗗ɪʀᴇᴄᴛᴏʀ ➜ ${tvInfo.directors || 'N/A'}\n⭐ 𝗦ᴛᴀʀ𝘀: ${tvInfo.stars || 'N/A'}\n📝 𝗦𝘁𝗼𝗿𝘆 ➜ ${tvInfo.story ? (tvInfo.story.length > 250 ? tvInfo.story.substring(0, 250) + '...' : tvInfo.story) : 'N/A'}\n🗿 𝗪ᴇʙ ➜ cinesubz.com\n ${DEFAULT_FOOTER}`;
+                        let tvDetailsText = `╭━━━〔 *TV SERIES DETAILS* 〕━━━╮\n\n📺 *${tvInfo.title}*\n⭐ 𝗜ᴍᴅʙ ➜ ★ ${tvInfo.rating || 'N/A'}\n📅 𝗬ᴇᴀʀ ➜ ${tvInfo.year || 'N/A'}\n⏳ 𝗥ᴜɴᴛɪᴍᴇ ➜ ${tvInfo.duration || 'N/A'}\n🌍 𝗖ᴏᴜɴ𝘁𝗿ʏ ➜ ${tvInfo.country || 'N/A'}\n🎭 𝗚𝗲𝗻 genres ➜ ${tvInfo.genres ? tvInfo.genres.join(', ') : 'N/A'}\n🎬 𝗗ɪʀᴇᴄᴛᴏʀ ➜ ${tvInfo.directors || 'N/A'}\n⭐ 𝗦ᴛᴀʀ𝘀: ${tvInfo.stars || 'N/A'}\n📝 𝗦𝘁𝗼𝗿𝘆 ➜ ${tvInfo.story ? (tvInfo.story.length > 250 ? tvInfo.story.substring(0, 250) + '...' : tvInfo.story) : 'N/A'}\n🗿 𝗪ᴇʙ ➜ cinesubz.com\n ${DEFAULT_FOOTER}`;
 
                         const posterUrl = tvInfo.image || selectedItem.image || DEFAULT_IMAGE;
                         await socket.sendMessage(sender, {
@@ -4653,7 +4885,7 @@ case 'tvsend': {
 
                         // AUTO DOWNLOAD ALL EPISODES
                         await socket.sendMessage(sender, { 
-                            text: `*❪ DOWNLOAD EPISODES ❫*\n\n📺 *Series:* _${tvInfo.title}_\n🎬 *Episodes:* _${tvInfo.episodes.length}_\n⚡ _Starting download process..._${DEFAULT_FOOTER}`
+                            text: `╭━━━〔 *DOWNLOAD EPISODES* 〕━━━╮\n\n📺 *Series:* _${tvInfo.title}_\n🎬 *Episodes:* _${tvInfo.episodes.length}_\n⚡ _Starting download process..._${DEFAULT_FOOTER}`
                         }, { quoted: replyMek });
 
                         let successCount = 0;
@@ -4663,7 +4895,7 @@ case 'tvsend': {
                             const episode = tvInfo.episodes[i];
                             try {
                                 await socket.sendMessage(sender, { 
-                                    text: `*❪ DOWNLOADING ❫*\n\n🎥 *Episode:* _${episode.episode_name}_\n📊 *Progress:* _${i + 1}/${tvInfo.episodes.length}_`
+                                    text: `╭━━━〔 *DOWNLOADING* 〕━━━╮\n\n🎥 *Episode:* _${episode.episode_name}_\n📊 *Progress:* _${i + 1}/${tvInfo.episodes.length}_`
                                 }, { quoted: replyMek });
 
                                 const epDlRes = await axios.get(`${API_BASE}/api/v1/movie/cinesubz/tv/dl?q=${encodeURIComponent(episode.episode_url)}&api_key=${API_KEY}`);
@@ -4696,7 +4928,7 @@ case 'tvsend': {
                         }
 
                         await socket.sendMessage(sender, { 
-                            text: `*❪ SUMMARY ❫*\n\n📤 *Group:* _${targetGroupName}_\n\n🎉 *Download Complete!*\n\n🎬 *Series:* _${tvInfo.title}_\n✅ *Success:* _${successCount} Episodes_\n❌ *Failed:* _${failCount} Episodes_${DEFAULT_FOOTER}`
+                            text: `╭━━━〔 *SUMMARY* 〕━━━╮\n\n📤 *Group:* _${targetGroupName}_\n\n🎉 *Download Complete!*\n\n🎬 *Series:* _${tvInfo.title}_\n✅ *Success:* _${successCount} Episodes_\n❌ *Failed:* _${failCount} Episodes_${DEFAULT_FOOTER}`
                         }, { quoted: replyMek });
 
                         socket.ev.off('messages.upsert', handleSelection);
@@ -4704,7 +4936,7 @@ case 'tvsend': {
                     } catch (tvShowError) {
                         console.error('TV Show error:', tvShowError);
                         await socket.sendMessage(sender, {
-                            text: `*❪ ERROR ❫*\n\n❌ *TV Details Error!*\n🚫 _${tvShowError.message}_${DEFAULT_FOOTER}`
+                            text: `╭━━━〔 *ERROR* 〕━━━╮\n\n❌ *TV Details Error!*\n🚫 _${tvShowError.message}_${DEFAULT_FOOTER}`
                         }, { quoted: replyMek });
                         socket.ev.off('messages.upsert', handleSelection);
                     }
@@ -4712,7 +4944,7 @@ case 'tvsend': {
                 } else {
                     // MOVIE FLOW
                     await socket.sendMessage(sender, { 
-                        text: `*❪ FETCHING ❫*\n\n🎬 *Fetching Movie...*\n⚡ _Please wait..._`
+                        text: `╭━━━〔 *FETCHING* 〕━━━╮\n\n🎬 *Fetching Movie...*\n⚡ _Please wait..._`
                     }, { quoted: replyMek });
 
                     try {
@@ -4728,12 +4960,12 @@ case 'tvsend': {
 
                         if (validDownloads.length === 0) {
                             await socket.sendMessage(sender, {
-                                text: `*❪ NO DOWNLOADS ❫*\n\n⚠️ *No Downloads Found!*\n😞 _There are no downloads available for this movie!_${DEFAULT_FOOTER}`
+                                text: `╭━━━〔 *NO DOWNLOADS* 〕━━━╮\n\n⚠️ *No Downloads Found!*\n😞 _There are no downloads available for this movie!_${DEFAULT_FOOTER}`
                             }, { quoted: replyMek });
                             return;
                         }
 
-                        const movieDetailsText = `*❪ MOVIE DETAILS ❫*\n\n🎬 *${movieInfo.title}*\n⭐ 𝗜𝗠𝗗𝗕 ➜ ★ ${movieInfo.imdb || movieInfo.rating || 'N/A'}\n📅 𝗬𝗲𝗮𝗿 ➜ ${movieInfo.year || 'N/A'}\n⏳ 𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻 ➜ ${movieInfo.duration || 'N/A'}\n🌍 𝗖ᴏᴜɴ𝘁𝗿ʏ ➜ ${movieInfo.country || 'N/A'}\n🎭 𝗚𝗲𝗻 genres ➜ ${movieInfo.genres ? movieInfo.genres.join(', ') : 'N/A'}\n🏷️  ➜ ${movieInfo.language || movieInfo.tag || 'N/A'}\n🎬  ➜ ${movieInfo.directors || movieInfo.director || 'N/A'}\n⭐  ➜ ${movieInfo.stars || 'N/A'}\n📝  ➜ ${movieInfo.story ? (movieInfo.story.length > 250 ? movieInfo.story.substring(0, 250) + '...' : movieInfo.story) : 'N/A'}\n🗿 𝗪ᴇʙ ➜ cinesubz.com\n ${DEFAULT_FOOTER}`;
+                        const movieDetailsText = `╭━━━〔 *MOVIE DETAILS* 〕━━━╮\n\n🎬 *${movieInfo.title}*\n⭐ 𝗜𝗠𝗗𝗕 ➜ ★ ${movieInfo.imdb || movieInfo.rating || 'N/A'}\n📅 𝗬𝗲𝗮𝗿 ➜ ${movieInfo.year || 'N/A'}\n⏳ 𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻 ➜ ${movieInfo.duration || 'N/A'}\n🌍 𝗖ᴏᴜɴ𝘁𝗿ʏ ➜ ${movieInfo.country || 'N/A'}\n🎭 𝗚𝗲𝗻 genres ➜ ${movieInfo.genres ? movieInfo.genres.join(', ') : 'N/A'}\n🏷️  ➜ ${movieInfo.language || movieInfo.tag || 'N/A'}\n🎬  ➜ ${movieInfo.directors || movieInfo.director || 'N/A'}\n⭐  ➜ ${movieInfo.stars || 'N/A'}\n📝  ➜ ${movieInfo.story ? (movieInfo.story.length > 250 ? movieInfo.story.substring(0, 250) + '...' : movieInfo.story) : 'N/A'}\n🗿 𝗪ᴇʙ ➜ cinesubz.com\n ${DEFAULT_FOOTER}`;
 
                         const moviePosterUrl = movieInfo.image || selectedItem.image || DEFAULT_IMAGE;
                         await socket.sendMessage(sender, {
@@ -4741,7 +4973,7 @@ case 'tvsend': {
                             caption: movieDetailsText
                         }, { quoted: replyMek });
 
-                        const downloadOptionsText = `*❪ DOWNLOADS ❫*\n\n📥 *Select Quality:*\n\n${validDownloads.map((dl, i) => {
+                        const downloadOptionsText = `╭━━━〔 *DOWNLOADS* 〕━━━╮\n\n📥 *Select Quality:*\n\n${validDownloads.map((dl, i) => {
     const num = (i + 1) < 10 ? `0${i + 1}` : `${i + 1}`;
     const qualityIcon = (dl.quality || '').includes('1080') ? '🔥' : (dl.quality || '').includes('720') ? '💎' : '📱';
     return `*${num}* ➜ ${qualityIcon} _${dl.quality}_ 💾 _${dl.size || 'N/A'}_`;
@@ -4762,7 +4994,7 @@ case 'tvsend': {
 
                                 if (isNaN(choiceNum) || choiceNum < 0 || choiceNum >= validDownloads.length) {
                                     await socket.sendMessage(sender, {
-                                        text: `*❪ INVALID ❫*\n\n⚠️ *Wrong Number!*\n🎯 *Range:* _01 - ${validDownloads.length}_\n📝 _Please reply with a valid number!_${DEFAULT_FOOTER}`
+                                        text: `╭━━━〔 *INVALID* 〕━━━╮\n\n⚠️ *Wrong Number!*\n🎯 *Range:* _01 - ${validDownloads.length}_\n📝 _Please reply with a valid number!_${DEFAULT_FOOTER}`
                                     }, { quoted: downloadMek });
                                     return;
                                 }
@@ -4788,7 +5020,7 @@ case 'tvsend': {
                                 } catch (downloadError) {
                                     console.error('Download link error:', downloadError);
                                     await socket.sendMessage(sender, {
-                                        text: `*❪ ERROR ❫*\n\n❌ *Download Failed!*\n🚫 _${downloadError.message}_${DEFAULT_FOOTER}`
+                                        text: `╭━━━〔 *ERROR* 〕━━━╮\n\n❌ *Download Failed!*\n🚫 _${downloadError.message}_${DEFAULT_FOOTER}`
                                     }, { quoted: downloadMek });
                                 } finally {
                                     socket.ev.off('messages.upsert', handleDownload);
@@ -4802,7 +5034,7 @@ case 'tvsend': {
                     } catch (detailsError) {
                         console.error('Details error:', detailsError);
                         await socket.sendMessage(sender, {
-                            text: `*❪ ERROR ❫*\n\n❌ *Movie Details Error!*\n🚫 _${detailsError.message}_${DEFAULT_FOOTER}`
+                            text: `╭━━━〔 *ERROR* 〕━━━╮\n\n❌ *Movie Details Error!*\n🚫 _${detailsError.message}_${DEFAULT_FOOTER}`
                         }, { quoted: replyMek });
                         socket.ev.off('messages.upsert', handleSelection);
                     }
@@ -4815,7 +5047,7 @@ case 'tvsend': {
     } catch (error) {
         console.error('Cinesubz command error:', error);
         await socket.sendMessage(sender, {
-            text: `*❪ SYSTEM ERROR ❫*\n\n❌ *System Error!*\n🚫 _${error.message || 'Unknown error'}_\n\n🔄 _Please try again later..._${DEFAULT_FOOTER}`
+            text: `╭━━━〔 *SYSTEM ERROR* 〕━━━╮\n\n❌ *System Error!*\n🚫 _${error.message || 'Unknown error'}_\n\n🔄 _Please try again later..._${DEFAULT_FOOTER}`
         }, { quoted: msg });
     }
 
@@ -5550,7 +5782,7 @@ case 'pastpapers': {
 case 'dinka':
 case 'dinkamovies':
 case 'dinkamovieslk': {
-    const DEFAULT_FOOTER = `\n\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 👑 𝗦𝗛𝗔𝗚𝗚𝗬 𝗧𝗘𝗖𝗛`;
+    const DEFAULT_FOOTER = SHAGGY_FOOTER;
     const TEMP_DIR = './tmp_dinka';
 
     if (!args.length) {
@@ -5739,7 +5971,7 @@ case 'dinkamovieslk': {
 
     try {
         await socket.sendMessage(sender, {
-            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚 ❫*\n\n🔍 *Searching DinkaMovies for:* _${dinkaQuery}_\n⚡ _Please wait..._`
+            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚* 〕━━━╮\n\n🔍 *Searching DinkaMovies for:* _${dinkaQuery}_\n⚡ _Please wait..._`
         }, { quoted: msg });
 
         // ═══ STEP 1 : SEARCH ═══
@@ -5762,7 +5994,7 @@ case 'dinkamovieslk': {
         }
 
         const dinkaList = searchData.data.slice(0, 20);
-        let listText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗜𝗡𝗞𝗔𝗠𝗢𝗩𝗜𝗘𝗦 ❫*\n\n🎯 *Query:* _${dinkaQuery}_\n📊 *Results:* _${dinkaList.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
+        let listText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗜𝗡𝗞𝗔𝗠𝗢𝗩𝗜𝗘𝗦* 〕━━━╮\n\n🎯 *Query:* _${dinkaQuery}_\n📊 *Results:* _${dinkaList.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
 
         dinkaList.forEach((item, index) => {
             const num = (index + 1) < 10 ? `0${index + 1}` : `${index + 1}`;
@@ -5815,7 +6047,7 @@ case 'dinkamovieslk': {
 
                 const isTv = mediaData.type === 'tv_series' || downloads[0].episode !== undefined;
 
-                let infoText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗜𝗡𝗞𝗔𝗠𝗢𝗩𝗜𝗘𝗦 ❫*\n\n`;
+                let infoText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗜𝗡𝗞𝗔𝗠𝗢𝗩𝗜𝗘𝗦* 〕━━━╮\n\n`;
                 infoText += `🎬 *${mediaData.title}*\n`;
                 if (mediaData.genres?.length) infoText += `🎭 *Genres:* ${mediaData.genres.join(', ')}\n`;
                 infoText += `\n`;
@@ -5912,7 +6144,7 @@ case 'dinkamovieslk': {
                                 document: { url: localFile },
                                 mimetype: 'video/mp4',
                                 fileName: fileName,
-                                caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗜𝗡𝗞𝗔𝗠𝗢𝗩𝗜𝗘𝗦*\n\n🎬 *Title:* ${mediaData.title}\n📌 *Option:* ${selectedOption.title || selectedOption.quality || 'Direct'}\n📦 *Size:* ${realSizeMB.toFixed(1)} MB\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭`
+                                caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗜𝗡𝗞𝗔𝗠𝗢𝗩𝗜𝗘𝗦*\n\n🎬 *Title:* ${mediaData.title}\n📌 *Option:* ${selectedOption.title || selectedOption.quality || 'Direct'}\n📦 *Size:* ${realSizeMB.toFixed(1)} MB\n> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`
                             }, { quoted: optMek });
 
                             await socket.sendMessage(sender, { react: { text: '✅', key: optMek.key } });
@@ -5930,7 +6162,7 @@ case 'dinkamovieslk': {
                         console.error('[Dinka] download error:', downloadErr.message);
 
                         await socket.sendMessage(sender, {
-                            text: `⚠️ *Direct Download*\n\n🎬 *${mediaData.title}*\n📌 *${selectedOption.quality}*\n📦 *${selectedOption.size || 'N/A'}*\n\n🔗 *Download Link:*\n${rawUrl}\n\n💡 _IDM එකෙන් download කරන්න._\n\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭`
+                            text: `⚠️ *Direct Download*\n\n🎬 *${mediaData.title}*\n📌 *${selectedOption.quality}*\n📦 *${selectedOption.size || 'N/A'}*\n\n🔗 *Download Link:*\n${rawUrl}\n\n💡 _IDM එකෙන් download කරන්න._\n\n> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`
                         }, { quoted: optMek });
 
                         try { await fs.remove(localFile); } catch {}
@@ -6687,12 +6919,12 @@ case 'cv': {
 // ==========================================
 case 'lakvision':
 case 'lv': {
-    const DEFAULT_FOOTER = `\n\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 👑 𝗦𝗛𝗔𝗚𝗚𝗬 𝗧𝗘𝗖𝗛`;
+    const DEFAULT_FOOTER = SHAGGY_FOOTER;
     const TEMP_DIR = './tmp_lakvision';
 
     if (!args.length) {
         return socket.sendMessage(sender, {
-            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 ❫*\n\n⚠️ *Invalid Usage!*\n\n🎬 *Example:*\n• .lakvision avatar\n• .lv game of thrones\n\n📝 _Please provide the Movie/Series name!_${DEFAULT_FOOTER}`
+            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 〕━━━╮\n\n⚠️ *Invalid Usage!*\n\n🎬 *Example:*\n• .lakvision avatar\n• .lv game of thrones\n\n📝 _Please provide the Movie/Series name!_${DEFAULT_FOOTER}`
         }, { quoted: msg });
     }
 
@@ -6725,7 +6957,7 @@ case 'lv': {
     const downloadToServer = async (url, dest) => { await robustDownload(url, dest, 'https://lakvisiontv.lk/'); return fs.stat(dest); };
 
     await socket.sendMessage(sender, {
-        text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚 ❫*\n\n🔍 *Searching LakvisionTV for:* _${query}_\n⚡ _Please wait..._`
+        text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚* 〕━━━╮\n\n🔍 *Searching LakvisionTV for:* _${query}_\n⚡ _Please wait..._`
     }, { quoted: msg });
 
     try {
@@ -6735,11 +6967,11 @@ case 'lv': {
 
         if (!results.length) {
             return socket.sendMessage(sender, {
-                text: `*❪ 𝗦𝗛??𝗚𝗚𝗬 𝗫𝗠𝗗 ❫*\n\n😞 *No Results Found!*\n🎬 *Query:* _${query}_${DEFAULT_FOOTER}`
+                text: `╭━━━〔 *𝗦𝗛??𝗚𝗚𝗬 𝗫𝗠𝗗* 〕━━━╮\n\n😞 *No Results Found!*\n🎬 *Query:* _${query}_${DEFAULT_FOOTER}`
             }, { quoted: msg });
         }
 
-        let listText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗟𝗔𝗞𝗩𝗜𝗦𝗜𝗢𝗡 ❫*\n\n🎯 *Query:* _${query}_\n📊 *Total:* _${results.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
+        let listText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗟𝗔𝗞𝗩𝗜𝗦𝗜𝗢𝗡* 〕━━━╮\n\n🎯 *Query:* _${query}_\n📊 *Total:* _${results.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
         results.slice(0, 15).forEach((item, index) => {
             const num = (index + 1) < 10 ? `0${index + 1}` : `${index + 1}`;
             const typeIcon = (item.type === 'tvshows' || item.type === 'tv') ? '📺' : '🎥';
@@ -6771,7 +7003,7 @@ case 'lv': {
                 const isTvShow = selectedItem.type === 'tvshows' || selectedItem.type === 'tv';
 
                 await socket.sendMessage(sender, {
-                    text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚 ❫*\n\n🎬 *Fetching details...*\n⚡ _Please wait..._`
+                    text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚* 〕━━━╮\n\n🎬 *Fetching details...*\n⚡ _Please wait..._`
                 }, { quoted: replyMek });
 
                 try {
@@ -6781,7 +7013,7 @@ case 'lv': {
                     const episodes = movieInfo.episodes || [];
 
                     // Details
-                    let detailsText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗟𝗔𝗞𝗩𝗜𝗦𝗜𝗢𝗡 ❫*\n\n`;
+                    let detailsText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • ??𝗔𝗞𝗩𝗜𝗦𝗜𝗢𝗡* 〕━━━╮\n\n`;
                     detailsText += `🎬 *${movieInfo.title || selectedItem.title}*\n`;
                     detailsText += `⭐ *IMDb:* ${movieInfo.imdb || movieInfo.rating || 'N/A'}\n`;
                     detailsText += `📅 *Year:* ${movieInfo.year || 'N/A'}\n`;
@@ -6798,7 +7030,7 @@ case 'lv': {
 
                     // TV Episodes
                     if (isTvShow && episodes.length > 0) {
-                        let epListText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗘𝗣𝗜𝗦𝗢𝗗𝗘𝗦 ❫*\n\n📺 *Total Episodes:* ${episodes.length}\n\n`;
+                        let epListText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗘𝗣𝗜𝗦𝗢𝗗𝗘𝗦* 〕━━━╮\n\n📺 *Total Episodes:* ${episodes.length}\n\n`;
                         episodes.slice(0, 15).forEach((ep, epIdx) => {
                             epListText += `*${epIdx + 1}.* ${ep.name || ep.title || 'Episode ' + (epIdx + 1)}\n`;
                         });
@@ -6812,7 +7044,7 @@ case 'lv': {
                         return socket.sendMessage(sender, { text: `⚠️ *No Direct Downloads available.*${DEFAULT_FOOTER}` }, { quoted: replyMek });
                     }
 
-                    let dlText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗦 ❫*\n\n📥 *Select Quality:*\n\n`;
+                    let dlText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗦* 〕━━━╮\n\n📥 *Select Quality:*\n\n`;
                     validDownloads.slice(0, 20).forEach((dl, i) => {
                         const num = (i + 1) < 10 ? `0${i + 1}` : `${i + 1}`;
                         const sizeMB = parseSizeMB(dl.size);
@@ -6877,7 +7109,7 @@ case 'lv': {
                                     document: { url: localFile },
                                     mimetype: 'video/mp4',
                                     fileName: `${safeName} - ${selectedDownload.quality || 'HD'}.mp4`,
-                                    caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗟𝗔𝗞𝗩𝗜𝗦𝗜𝗢𝗡*\n\n🎬 *Title:* ${movieInfo.title || selectedItem.title}\n📌 *Quality:* ${selectedDownload.quality || 'HD'}\n📦 *Size:* ${selectedDownload.size || 'N/A'}\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭`
+                                    caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗟𝗔𝗞𝗩𝗜𝗦𝗜𝗢𝗡*\n\n🎬 *Title:* ${movieInfo.title || selectedItem.title}\n📌 *Quality:* ${selectedDownload.quality || 'HD'}\n📦 *Size:* ${selectedDownload.size || 'N/A'}\n> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`
                                 }, { quoted: dlReplyMek });
                                 await socket.sendMessage(sender, { react: { text: '✅', key: dlReplyMek.key } });
                             } catch (sendErr) {
@@ -6910,7 +7142,7 @@ case 'lv': {
     } catch (err) {
         clearAllLvListeners();
         await socket.sendMessage(sender, {
-            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗘𝗥𝗥𝗢𝗥 ❫*\n\n❌ *Search Error:* ${err.message}${DEFAULT_FOOTER}`
+            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗘𝗥𝗥𝗢𝗥* 〕━━━╮\n\n❌ *Search Error:* ${err.message}${DEFAULT_FOOTER}`
         }, { quoted: msg });
     }
     break;
@@ -6920,7 +7152,7 @@ case 'lv': {
 // ==========================================
 case 'piratelk':
 case 'plk': {
-    const DEFAULT_FOOTER = `\n\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 👑 𝗦𝗛𝗔𝗚𝗚𝗬 𝗧𝗘𝗖𝗛`;
+    const DEFAULT_FOOTER = SHAGGY_FOOTER;
 
     if (!args.length) {
         await socket.sendMessage(sender, {
@@ -6961,7 +7193,7 @@ case 'plk': {
     };
 
     await socket.sendMessage(sender, {
-        text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚 ❫*\n\n🔍 *Searching PirateLK for:* _${query}_\n⚡ _Please wait..._`
+        text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚* 〕━━━╮\n\n🔍 *Searching PirateLK for:* _${query}_\n⚡ _Please wait..._`
     }, { quoted: msg });
 
     try {
@@ -6973,12 +7205,12 @@ case 'plk': {
 
         if (!results.length) {
             await socket.sendMessage(sender, {
-                text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 ❫*\n\n😞 *No Results Found on PirateLK!*\n🎬 *Query:* _${query}_${DEFAULT_FOOTER}`
+                text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 〕━━━╮\n\n😞 *No Results Found on PirateLK!*\n🎬 *Query:* _${query}_${DEFAULT_FOOTER}`
             }, { quoted: msg });
             break;
         }
 
-        let listText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗣𝗜𝗥𝗔𝗧𝗘𝗟𝗞 ❫*\n\n🎯 *Query:* _${query}_\n📊 *Total:* _${results.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
+        let listText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗣𝗜𝗥𝗔𝗧𝗘𝗟𝗞* 〕━━━╮\n\n🎯 *Query:* _${query}_\n📊 *Total:* _${results.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
 
         results.slice(0, 15).forEach((item, index) => {
             const num = (index + 1) < 10 ? `0${index + 1}` : `${index + 1}`;
@@ -7013,7 +7245,7 @@ case 'plk': {
                 const selectedItem = results[choice];
 
                 await socket.sendMessage(sender, {
-                    text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚 ❫*\n\n🎬 *Fetching Movie details from PirateLK...*\n⚡ _Please wait..._`
+                    text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚* 〕━━━╮\n\n🎬 *Fetching Movie details from PirateLK...*\n⚡ _Please wait..._`
                 }, { quoted: replyMek });
 
                 try {
@@ -7025,7 +7257,7 @@ case 'plk': {
                     const validDownloads = movieInfo.downloads || [];
 
                     // Details
-                    let detailsText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗣𝗜𝗥𝗔𝗧𝗘𝗟𝗞 ❫*\n\n`;
+                    let detailsText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗣𝗜𝗥𝗔𝗧𝗘𝗟𝗞* 〕━━━╮\n\n`;
                     detailsText += `🎬 *${movieInfo.title || selectedItem.title}*\n`;
                     detailsText += `⭐ *IMDb:* ${movieInfo.imdb || movieInfo.rating || 'N/A'}\n`;
                     detailsText += `📅 *Year:* ${movieInfo.year || 'N/A'}\n`;
@@ -7048,7 +7280,7 @@ case 'plk': {
                     }
 
                     // ═══ STEP 4 : DOWNLOAD OPTIONS ═══
-                    let dlText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗦 ❫*\n\n📥 *Select Quality:*\n\n`;
+                    let dlText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗦* 〕━━━╮\n\n📥 *Select Quality:*\n\n`;
                     validDownloads.slice(0, 20).forEach((dl, i) => {
                         const num = (i + 1) < 10 ? `0${i + 1}` : `${i + 1}`;
                         // ⭐ Fix: title → quality → name → "Download N"
@@ -7082,6 +7314,16 @@ case 'plk': {
 
                         await socket.sendMessage(sender, { react: { text: '🔗', key: dlReplyMek.key } });
 
+                        // 📁 UsersDrive link ekak nam → automatically download karala file eka yawanawa
+                        const plkUdLink = extractUsersDriveLink(fileUrl);
+                        if (plkUdLink) {
+                            await socket.sendMessage(sender, {
+                                text: `╭━━━〔 📁 *USERSDRIVE DETECTED* 〕━━━╮\n┃\n┃ 🎬 *${(movieInfo.title || selectedItem.title || '').substring(0, 30)}*\n┃ 📌 *Quality :* ${label}\n┃ 📦 *Size :* ${size}\n┃\n┃  ⚡ _Auto download wenawa..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯${DEFAULT_FOOTER}`
+                            }, { quoted: dlReplyMek });
+                            await shaggyUdDownload(socket, sender, dlReplyMek, plkUdLink);
+                            return;
+                        }
+
                         // ⚠️ PirateLK — HTML page → link only
                         await socket.sendMessage(sender, {
                             text:
@@ -7099,7 +7341,7 @@ ${fileUrl}
 • IDM / ADM use කරන්න
 • WiFi use කරන්න
 
-> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭`
+> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`
                         }, { quoted: dlReplyMek });
 
                         await socket.sendMessage(sender, { react: { text: '✅', key: dlReplyMek.key } });
@@ -7123,7 +7365,7 @@ ${fileUrl}
     } catch (err) {
         clearAllPlkListeners();
         await socket.sendMessage(sender, {
-            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗘𝗥𝗥𝗢𝗥 ❫*\n\n❌ *Search Error:* ${err.message}${DEFAULT_FOOTER}`
+            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗘𝗥𝗥𝗢𝗥* 〕━━━╮\n\n❌ *Search Error:* ${err.message}${DEFAULT_FOOTER}`
         }, { quoted: msg });
     }
     break;
@@ -7300,7 +7542,7 @@ case 'mf': {
 
 case 'gdrive':
 case 'gdl': {
-    const DEFAULT_FOOTER = `\n\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 👑 𝗦𝗛𝗔𝗚𝗚𝗬 𝗧𝗘𝗖𝗛`;
+    const DEFAULT_FOOTER = SHAGGY_FOOTER;
     const TEMP_DIR = './tmp_gdrive';
 
     if (!args.length) {
@@ -7483,7 +7725,7 @@ case 'gdl': {
     };
 
     await socket.sendMessage(sender, {
-        text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗚𝗗𝗥𝗜𝗩𝗘 ❫*\n\n⏳ *Fetching file details...*\n📌 *File ID:* \`${fileId.substring(0, 20)}...\`\n\n_කරුණාකර රැඳී සිටින්න..._`
+        text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗚𝗗𝗥𝗜𝗩𝗘* 〕━━━╮\n\n⏳ *Fetching file details...*\n📌 *File ID:* \`${fileId.substring(0, 20)}...\`\n\n_කරුණාකර රැඳී සිටින්න..._`
     }, { quoted: msg });
 
     let localFile = null;
@@ -7509,7 +7751,7 @@ case 'gdl': {
                 document: { url: localFile },
                 mimetype: 'video/mp4',
                 fileName: fileName,
-                caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗚𝗗𝗥𝗜𝗩𝗘*\n\n📦 *Size:* ${realSizeMB.toFixed(1)} MB\n🔗 *File ID:* \`${fileId.substring(0, 15)}...\`\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭`
+                caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗚𝗗𝗥𝗜𝗩𝗘*\n\n📦 *Size:* ${realSizeMB.toFixed(1)} MB\n🔗 *File ID:* \`${fileId.substring(0, 15)}...\`\n> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`
             }, { quoted: msg });
 
             await socket.sendMessage(sender, { react: { text: '✅', key: msg.key } });
@@ -7543,7 +7785,7 @@ ${directUrl}
 • Browser එකෙන් open කරන්න
 • IDM / ADM use කරන්න
 
-> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭`
+> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`
         }, { quoted: msg });
 
         if (localFile) { try { await fs.remove(localFile); } catch {} }
@@ -7558,12 +7800,12 @@ ${directUrl}
 case 'youtube':
 case 'yt':
 case 'ytmp3': {
-    const DEFAULT_FOOTER = `\n\n> 📥 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗠𝗘𝗗𝗜𝗔 📥\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 👑 𝗦𝗛𝗔𝗚𝗚𝗬 𝗧𝗘𝗖𝗛`;
+    const DEFAULT_FOOTER = SHAGGY_FOOTER;
     const TEMP_DIR = './tmp_youtube';
 
     if (!args.length) {
         return socket.sendMessage(sender, {
-            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 ❫*\n\n⚠️ *Invalid Usage!*\n\n🎬 *Example:*\n• .youtube https://youtu.be/xxxx\n• .ytmp3 https://youtu.be/xxxx\n\n📝 _Please provide a YouTube URL!_${DEFAULT_FOOTER}`
+            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 〕━━━╮\n\n⚠️ *Invalid Usage!*\n\n🎬 *Example:*\n• .youtube https://youtu.be/xxxx\n• .ytmp3 https://youtu.be/xxxx\n\n📝 _Please provide a YouTube URL!_${DEFAULT_FOOTER}`
         }, { quoted: msg });
     }
 
@@ -7589,7 +7831,7 @@ case 'ytmp3': {
     const downloadToServer = async (url, dest) => { await robustDownload(url, dest, 'https://www.youtube.com/'); return fs.stat(dest); };
 
     await socket.sendMessage(sender, {
-        text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗖𝗢𝗡𝗩𝗘𝗥𝗧𝗜𝗡𝗚 ❫*\n\n⚡ *Fetching YouTube ${dlType.toUpperCase()}...*\n⏳ _Please wait a moment..._`
+        text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗖𝗢𝗡𝗩𝗘𝗥𝗧𝗜𝗡𝗚* 〕━━━╮\n\n⚡ *Fetching YouTube ${dlType.toUpperCase()}...*\n⏳ _Please wait a moment..._`
     }, { quoted: msg });
 
     try {
@@ -7643,7 +7885,7 @@ case 'ytmp3': {
                     }, { quoted: msg });
 
                     await socket.sendMessage(sender, {
-                        text: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗔𝗨𝗗𝗜𝗢*\n\n🎵 *Title:* ${title}\n⏳ *Duration:* ${ytData.duration || 'N/A'}\n📦 *Size:* ${realSizeMB.toFixed(1)} MB\n> 📥 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗠𝗘𝗗𝗜𝗔 📥`
+                        text: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗔𝗨𝗗𝗜𝗢*\n\n🎵 *Title:* ${title}\n⏳ *Duration:* ${ytData.duration || 'N/A'}\n📦 *Size:* ${realSizeMB.toFixed(1)} MB\n> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`
                     }, { quoted: msg });
 
                 } catch (sendErr) {
@@ -7659,7 +7901,7 @@ case 'ytmp3': {
                         video: { url: localFile },
                         mimetype: 'video/mp4',
                         fileName: `${safeName}.mp4`,
-                        caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗩𝗜𝗗𝗘𝗢*\n\n🎬 *Title:* ${title}\n⏳ *Duration:* ${ytData.duration || 'N/A'}\n📦 *Size:* ${realSizeMB.toFixed(1)} MB\n> 📥 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗠𝗘𝗗𝗜𝗔 📥`
+                        caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗩𝗜𝗗𝗘𝗢*\n\n🎬 *Title:* ${title}\n⏳ *Duration:* ${ytData.duration || 'N/A'}\n📦 *Size:* ${realSizeMB.toFixed(1)} MB\n> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`
                     }, { quoted: msg });
 
                 } catch (sendErr) {
@@ -7696,7 +7938,7 @@ case 'ytmp3': {
 case 'animexin':
 case 'donghua':
 case 'ax': {
-    const DEFAULT_FOOTER = `\n\n> 🐉 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🐉\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 👑 𝗦𝗛𝗔𝗚𝗚𝗬 𝗧𝗘𝗖𝗛`;
+    const DEFAULT_FOOTER = SHAGGY_FOOTER;
     const TEMP_DIR = './tmp_animexin';
 
     if (!args.length) {
@@ -7749,7 +7991,7 @@ case 'ax': {
 
     try {
         await socket.sendMessage(sender, {
-            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚 ❫*\n\n🔍 *Searching Animexin for:* _${axQuery}_\n⚡ _Please wait..._`
+            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚* 〕━━━╮\n\n🔍 *Searching Animexin for:* _${axQuery}_\n⚡ _Please wait..._`
         }, { quoted: msg });
 
         // ═══ STEP 1 : SEARCH ═══
@@ -7776,7 +8018,7 @@ case 'ax': {
         }
 
         const list = results.slice(0, 15);
-        let listText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗔𝗡𝗜𝗠𝗘𝗫𝗜𝗡 ❫*\n\n🎯 *Query:* _${axQuery}_\n📊 *Results:* _${list.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
+        let listText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗔𝗡𝗜𝗠𝗘𝗫𝗜𝗡* 〕━━━╮\n\n🎯 *Query:* _${axQuery}_\n📊 *Results:* _${list.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
 
         list.forEach((item, index) => {
             const num = (index + 1) < 10 ? `0${index + 1}` : `${index + 1}`;
@@ -7820,7 +8062,7 @@ case 'ax': {
                 const selectedSeries = list[choice];
 
                 await socket.sendMessage(sender, {
-                    text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚 ❫*\n\n🐉 *Fetching series info...*\n⚡ _Please wait..._`
+                    text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚* 〕━━━╮\n\n🐉 *Fetching series info...*\n⚡ _Please wait..._`
                 }, { quoted: replyMek });
 
                 try {
@@ -7838,7 +8080,7 @@ case 'ax': {
                     const episodes = seriesData.episodes || [];
 
                     // Series details
-                    let infoText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗔𝗡𝗜𝗠𝗘𝗫𝗜𝗡 ❫*\n\n`;
+                    let infoText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗔𝗡𝗜𝗠𝗘𝗫𝗜𝗡* 〕━━━╮\n\n`;
                     infoText += `🐉 *${seriesData.series_title || selectedSeries.title}*\n`;
                     if (seriesData.type) infoText += `📺 *Type:* ${seriesData.type}\n`;
                     if (seriesData.status || selectedSeries.status) infoText += `📡 *Status:* ${seriesData.status || selectedSeries.status}\n`;
@@ -7863,7 +8105,7 @@ case 'ax': {
 
                     // ═══ STEP 4 : EPISODES LIST ═══
                     const displayEps = episodes.slice(0, 999);
-                    let epText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗘𝗣𝗜𝗦𝗢𝗗𝗘𝗦 ❫*\n\n`;
+                    let epText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗘𝗣𝗜𝗦𝗢𝗗𝗘𝗦* 〕━━━╮\n\n`;
                     epText += `📺 *Series:* _${seriesData.series_title || selectedSeries.title}_\n`;
                     epText += `🔢 *Total:* _${displayEps.length} Episodes_\n\n`;
                     epText += `*👇 SELECT EPISODE NUMBER 👇*\n\n`;
@@ -7901,7 +8143,7 @@ case 'ax': {
                         }
 
                         await socket.sendMessage(sender, {
-                            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚 ❫*\n\n📺 *Episode ${selectedEp.episode_number || epIdx + 1}*\n⚡ _Fetching download links..._`
+                            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚* 〕━━━╮\n\n📺 *Episode ${selectedEp.episode_number || epIdx + 1}*\n⚡ _Fetching download links..._`
                         }, { quoted: epMek });
 
                         try {
@@ -7923,7 +8165,7 @@ case 'ax': {
                             const directDls = downloads.filter(d => d.direct && d.direct_download);
                             const otherDls = downloads.filter(d => !d.direct);
 
-                            let dlText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗦 ❫*\n\n`;
+                            let dlText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗦* 〕━━━╮\n\n`;
                             dlText += `📺 *Episode ${epData.episode_number || epIdx + 1}*\n`;
                             dlText += `🎬 *Series:* _${epData.series_title || selectedSeries.title}_\n\n`;
 
@@ -8007,7 +8249,7 @@ case 'ax': {
                                             document: { url: localFile },
                                             mimetype: 'video/mp4',
                                             fileName: fileName,
-                                            caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗔𝗡𝗜𝗠𝗘𝗫𝗜𝗡*\n\n🐉 *Series:* ${epData.series_title || selectedSeries.title}\n📺 *Episode:* ${epData.episode_number || epIdx + 1}\n🗣 *Language:* ${selectedDl.language || 'Sub'}\n📊 *Quality:* ${selectedDl.quality || 'HD'}\n📦 *Size:* ${realSizeMB.toFixed(1)} MB\n> 🐉 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🐉`
+                                            caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗔𝗡𝗜𝗠𝗘𝗫𝗜𝗡*\n\n🐉 *Series:* ${epData.series_title || selectedSeries.title}\n📺 *Episode:* ${epData.episode_number || epIdx + 1}\n🗣 *Language:* ${selectedDl.language || 'Sub'}\n📊 *Quality:* ${selectedDl.quality || 'HD'}\n📦 *Size:* ${realSizeMB.toFixed(1)} MB\n> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`
                                         }, { quoted: dlMek });
 
                                         await socket.sendMessage(sender, { react: { text: '✅', key: dlMek.key } });
@@ -8060,7 +8302,7 @@ case 'ax': {
     } catch (err) {
         clearAllAxListeners();
         await socket.sendMessage(sender, {
-            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗘𝗥𝗥𝗢𝗥 ❫*\n\n❌ *Search Error:* ${err.message}${DEFAULT_FOOTER}`
+            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗘𝗥𝗥𝗢𝗥* 〕━━━╮\n\n❌ *Search Error:* ${err.message}${DEFAULT_FOOTER}`
         }, { quoted: msg });
     }
     break;
@@ -8072,12 +8314,12 @@ case 'ax': {
 case 'cin':
 case 'cinz':
 case 'cmovie': {
-    const DEFAULT_FOOTER = `\n\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 👑 𝗦𝗛𝗔𝗚𝗚𝗬 𝗧𝗘𝗖𝗛`;
+    const DEFAULT_FOOTER = SHAGGY_FOOTER;
     const TEMP_DIR = './tmp_cinesubz';
 
     if (!args.length) {
         return socket.sendMessage(sender, {
-            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 ❫*\n\n⚠️ *Invalid Usage!*\n\n🎬 *Example:*\n• .cinesubz avatar\n• .cinetv game of thrones\n• .cmovie spider man\n\n📝 _Please provide Movie or TV Series name!_${DEFAULT_FOOTER}`
+            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 〕━━━╮\n\n⚠️ *Invalid Usage!*\n\n🎬 *Example:*\n• .cinesubz avatar\n• .cinetv game of thrones\n• .cmovie spider man\n\n📝 _Please provide Movie or TV Series name!_${DEFAULT_FOOTER}`
         }, { quoted: msg });
     }
 
@@ -8111,7 +8353,7 @@ case 'cmovie': {
     const downloadToServer = async (url, dest) => { await robustDownload(url, dest, 'https://cinesubz.co/'); return fs.stat(dest); };
 
     await socket.sendMessage(sender, {
-        text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚 ❫*\n\n🔍 *Searching CineSubz for:* _${cinesubQuery}_\n⚡ _Please wait..._`
+        text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚* 〕━━━╮\n\n🔍 *Searching CineSubz for:* _${cinesubQuery}_\n⚡ _Please wait..._`
     }, { quoted: msg });
 
     try {
@@ -8123,12 +8365,12 @@ case 'cmovie': {
 
         if (!searchData.status || !searchData.data || searchData.data.length === 0) {
             return socket.sendMessage(sender, {
-                text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 ❫*\n\n😞 *No Results Found!*\n🎬 *Query:* _${cinesubQuery}_${DEFAULT_FOOTER}`
+                text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 〕━━━╮\n\n😞 *No Results Found!*\n🎬 *Query:* _${cinesubQuery}_${DEFAULT_FOOTER}`
             }, { quoted: msg });
         }
 
         const cinesubResults = searchData.data.slice(0, 25);
-        let listText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗖𝗜𝗡𝗘𝗦𝗨𝗕𝗭 ❫*\n\n🎯 *Query:* _${cinesubQuery}_\n📊 *Results:* _${cinesubResults.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
+        let listText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗖𝗜𝗡𝗘𝗦𝗨𝗕𝗭* 〕━━━╮\n\n🎯 *Query:* _${cinesubQuery}_\n📊 *Results:* _${cinesubResults.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
 
         cinesubResults.forEach((item, index) => {
             const typeIcon = item.type === 'tvshows' ? '📺' : '🎥';
@@ -8167,7 +8409,7 @@ case 'cmovie': {
                 // ═══ TV SERIES FLOW ═══
                 if (isTvShow) {
                     await socket.sendMessage(sender, {
-                        text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚 ❫*\n\n📺 *Fetching TV Series...*\n⚡ _Please wait..._`
+                        text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚* 〕━━━╮\n\n📺 *Fetching TV Series...*\n⚡ _Please wait..._`
                     }, { quoted: replyMek });
 
                     try {
@@ -8183,7 +8425,7 @@ case 'cmovie': {
                         const tvInfo = tvShowData.data;
                         const episodes = tvInfo.episodes || [];
 
-                        let tvDetailsText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗧𝗩 𝗦𝗘𝗥𝗜𝗘𝗦 ❫*\n\n`;
+                        let tvDetailsText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗧𝗩 𝗦𝗘𝗥𝗜𝗘𝗦* 〕━━━╮\n\n`;
                         tvDetailsText += `📺 *${tvInfo.title}*\n`;
                         tvDetailsText += `⭐ *IMDb:* ${tvInfo.rating || 'N/A'}\n`;
                         tvDetailsText += `📅 *Year:* ${tvInfo.year || 'N/A'}\n`;
@@ -8207,7 +8449,7 @@ case 'cmovie': {
 
                         // ═══ EPISODES AUTO DOWNLOAD ═══
                         await socket.sendMessage(sender, {
-                            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗜𝗡𝗚 ❫*\n\n📺 *Series:* _${tvInfo.title}_\n🎬 *Episodes:* _${episodes.length}_\n⚡ _Starting download process..._${DEFAULT_FOOTER}`
+                            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗜𝗡𝗚* 〕━━━╮\n\n📺 *Series:* _${tvInfo.title}_\n🎬 *Episodes:* _${episodes.length}_\n⚡ _Starting download process..._${DEFAULT_FOOTER}`
                         }, { quoted: replyMek });
 
                         let successCount = 0;
@@ -8217,7 +8459,7 @@ case 'cmovie': {
                             const episode = episodes[i];
                             try {
                                 await socket.sendMessage(sender, {
-                                    text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗜𝗡𝗚 ❫*\n\n🎥 *Episode:* _${episode.episode_name || episode.name || 'Episode ' + (i + 1)}_\n📊 *Progress:* _${i + 1}/${episodes.length}_`
+                                    text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗜𝗡𝗚* 〕━━━╮\n\n🎥 *Episode:* _${episode.episode_name || episode.name || 'Episode ' + (i + 1)}_\n📊 *Progress:* _${i + 1}/${episodes.length}_`
                                 }, { quoted: replyMek });
 
                                 const epUrl = episode.episode_url || episode.url || episode.link;
@@ -8252,7 +8494,7 @@ case 'cmovie': {
                                             document: { url: localEpFile },
                                             mimetype: 'video/mp4',
                                             fileName: `${tvInfo.title} - ${episode.episode_name || 'Episode ' + (i + 1)}.mp4`,
-                                            caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗧𝗩 𝗘𝗣𝗜𝗦𝗢𝗗𝗘*\n\n📺 *Series:* ${tvInfo.title}\n📌 *Episode:* ${episode.episode_name || 'Episode ' + (i + 1)}\n📦 *Size:* ${epSizeMB.toFixed(1)} MB\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭`
+                                            caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗧𝗩 𝗘𝗣𝗜𝗦𝗢𝗗𝗘*\n\n📺 *Series:* ${tvInfo.title}\n📌 *Episode:* ${episode.episode_name || 'Episode ' + (i + 1)}\n📦 *Size:* ${epSizeMB.toFixed(1)} MB\n> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`
                                         }, { quoted: replyMek });
 
                                         await fs.remove(localEpFile).catch(() => {});
@@ -8279,21 +8521,21 @@ case 'cmovie': {
                         }
 
                         await socket.sendMessage(sender, {
-                            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗦𝗨𝗠𝗠𝗔𝗥𝗬 ❫*\n\n🎉 *Download Complete!*\n\n🎬 *Series:* _${tvInfo.title}_\n✅ *Success:* _${successCount} Episodes_\n❌ *Failed:* _${failCount} Episodes_${DEFAULT_FOOTER}`
+                            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗦𝗨𝗠𝗠𝗔𝗥𝗬* 〕━━━╮\n\n🎉 *Download Complete!*\n\n🎬 *Series:* _${tvInfo.title}_\n✅ *Success:* _${successCount} Episodes_\n❌ *Failed:* _${failCount} Episodes_${DEFAULT_FOOTER}`
                         }, { quoted: replyMek });
 
                         return;
                     } catch (tvShowError) {
                         console.error('TV Show error:', tvShowError);
                         return socket.sendMessage(sender, {
-                            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗘𝗥𝗥𝗢𝗥 ❫*\n\n❌ *TV Details Error!*\n🚫 _${tvShowError.message}_${DEFAULT_FOOTER}`
+                            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗘𝗥𝗥𝗢𝗥* 〕━━━╮\n\n❌ *TV Details Error!*\n🚫 _${tvShowError.message}_${DEFAULT_FOOTER}`
                         }, { quoted: replyMek });
                     }
                 }
 
                 // ═══ MOVIE FLOW ═══
                 await socket.sendMessage(sender, {
-                    text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚 ❫*\n\n🎬 *Fetching Movie details...*\n⚡ _Please wait..._`
+                    text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚* 〕━━━╮\n\n🎬 *Fetching Movie details...*\n⚡ _Please wait..._`
                 }, { quoted: replyMek });
 
                 try {
@@ -8311,11 +8553,11 @@ case 'cmovie': {
 
                     if (validDownloads.length === 0) {
                         return socket.sendMessage(sender, {
-                            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 ❫*\n\n⚠️ *No Downloads Found!*\n😞 _No downloads available for this movie._${DEFAULT_FOOTER}`
+                            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 〕━━━╮\n\n⚠️ *No Downloads Found!*\n😞 _No downloads available for this movie._${DEFAULT_FOOTER}`
                         }, { quoted: replyMek });
                     }
 
-                    let movieDetailsText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗠𝗢𝗩𝗜𝗘 ❫*\n\n`;
+                    let movieDetailsText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗠𝗢𝗩𝗜𝗘* 〕━━━╮\n\n`;
                     movieDetailsText += `🎬 *${movieInfo.title}*\n`;
                     movieDetailsText += `⭐ *IMDb:* ${movieInfo.imdb || movieInfo.rating || 'N/A'}\n`;
                     movieDetailsText += `📅 *Year:* ${movieInfo.year || 'N/A'}\n`;
@@ -8335,7 +8577,7 @@ case 'cmovie': {
                     }, { quoted: replyMek });
 
                     // Download options
-                    let dlText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗦 ❫*\n\n📥 *Select Quality:*\n\n`;
+                    let dlText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗦* 〕━━━╮\n\n📥 *Select Quality:*\n\n`;
                     validDownloads.slice(0, 20).forEach((dl, i) => {
                         const num = (i + 1) < 10 ? `0${i + 1}` : `${i + 1}`;
                         const sizeMB = parseSizeMB(dl.size);
@@ -8403,7 +8645,7 @@ case 'cmovie': {
                                     document: { url: localFile },
                                     mimetype: 'video/mp4',
                                     fileName: `${safeName} - ${selectedDownload.quality || 'HD'}.mp4`,
-                                    caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗖𝗜𝗡𝗘𝗦𝗨𝗕𝗭*\n\n🎬 *Title:* ${movieInfo.title}\n⭐ *IMDb:* ${movieInfo.imdb || movieInfo.rating || 'N/A'}\n📅 *Year:* ${movieInfo.year || 'N/A'}\n📌 *Quality:* ${selectedDownload.quality || 'HD'}\n📦 *Size:* ${selectedDownload.size || 'N/A'}\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭`
+                                    caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗖𝗜𝗡𝗘𝗦𝗨𝗕𝗭*\n\n🎬 *Title:* ${movieInfo.title}\n⭐ *IMDb:* ${movieInfo.imdb || movieInfo.rating || 'N/A'}\n📅 *Year:* ${movieInfo.year || 'N/A'}\n📌 *Quality:* ${selectedDownload.quality || 'HD'}\n📦 *Size:* ${selectedDownload.size || 'N/A'}\n> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`
                                 }, { quoted: dlReplyMek });
 
                                 await socket.sendMessage(sender, { react: { text: '✅', key: dlReplyMek.key } });
@@ -8431,7 +8673,7 @@ case 'cmovie': {
                 } catch (detailsError) {
                     clearAllCsListeners();
                     await socket.sendMessage(sender, {
-                        text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗘𝗥𝗥𝗢𝗥 ❫*\n\n❌ *Movie Details Error!*\n🚫 _${detailsError.message}_${DEFAULT_FOOTER}`
+                        text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗘𝗥𝗥𝗢𝗥* 〕━━━╮\n\n❌ *Movie Details Error!*\n🚫 _${detailsError.message}_${DEFAULT_FOOTER}`
                     }, { quoted: replyMek });
                 }
             }
@@ -8443,7 +8685,7 @@ case 'cmovie': {
     } catch (error) {
         clearAllCsListeners();
         await socket.sendMessage(sender, {
-            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗘𝗥𝗥𝗢𝗥 ❫*\n\n❌ *System Error!*\n🚫 _${error.message || 'Unknown error'}_${DEFAULT_FOOTER}`
+            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗘𝗥𝗥𝗢𝗥* 〕━━━╮\n\n❌ *System Error!*\n🚫 _${error.message || 'Unknown error'}_${DEFAULT_FOOTER}`
         }, { quoted: msg });
     }
     break;
@@ -9534,7 +9776,7 @@ case 'cmx': {
 // ==========================================
 case 'nethmv':
 case 'vault': {
-    const DEFAULT_FOOTER = `\n\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 👑 𝗦𝗛𝗔𝗚𝗚𝗬 𝗧𝗘𝗖𝗛`;
+    const DEFAULT_FOOTER = SHAGGY_FOOTER;
     const TEMP_DIR = './tmp_nethmv';
 
     // ⭐ API Config
@@ -9588,7 +9830,7 @@ case 'vault': {
 
     try {
         await socket.sendMessage(sender, {
-            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚 ❫*\n\n🔍 *Searching Stream Vault for:* _${searchQuery}_\n⚡ _Please wait..._`
+            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚* 〕━━━╮\n\n🔍 *Searching Stream Vault for:* _${searchQuery}_\n⚡ _Please wait..._`
         }, { quoted: msg });
 
         // ═══ STEP 1 : SEARCH ═══
@@ -9612,7 +9854,7 @@ case 'vault': {
             }, { quoted: msg });
         }
 
-        let listText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗡𝗘𝗧𝗛𝗠𝗩 ❫*\n\n🎯 *Query:* _${searchQuery}_\n📊 *Results:* _${files.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
+        let listText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗡𝗘𝗧𝗛𝗠𝗩* 〕━━━╮\n\n🎯 *Query:* _${searchQuery}_\n📊 *Results:* _${files.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
 
         files.forEach((file, index) => {
             const num = (index + 1) < 10 ? `0${index + 1}` : `${index + 1}`;
@@ -9711,7 +9953,7 @@ case 'vault': {
                         document: { url: localFile },
                         mimetype: isVideo ? 'video/mp4' : 'application/octet-stream',
                         fileName: fileName,
-                        caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗡𝗘𝗧𝗛𝗠𝗩*\n\n🎬 *Name:* ${fileData.name}\n📝 *Description:* ${(fileData.description || 'N/A').substring(0, 100)}\n📦 *Size:* ${formatBytes(fileData.size_bytes)}\n🏷️ *Type:* ${fileData.type || 'file'}\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭`
+                        caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗡𝗘𝗧𝗛𝗠𝗩*\n\n🎬 *Name:* ${fileData.name}\n📝 *Description:* ${(fileData.description || 'N/A').substring(0, 100)}\n📦 *Size:* ${formatBytes(fileData.size_bytes)}\n🏷️ *Type:* ${fileData.type || 'file'}\n> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`
                     }, { quoted: replyMek });
 
                     await socket.sendMessage(sender, { react: { text: '✅', key: replyMek.key } });
@@ -10029,7 +10271,7 @@ case 'hexrom':
 case 'rom':
 case 'game': {
     const chatJid = msg.key.remoteJid;
-    const DEFAULT_FOOTER = `\n\n> 🎮 𝗦𝗛??𝗚𝗚𝗬 𝗫𝗠𝗗 🎮\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 👑 𝗦𝗛𝗔𝗚𝗚𝗬 𝗧𝗘𝗖𝗛`;
+    const DEFAULT_FOOTER = SHAGGY_FOOTER;
 
     // ⚙️ CONFIG
     const HEXROM_CONFIG = {
@@ -10140,7 +10382,7 @@ case 'game': {
 
         try {
             await socket.sendMessage(chatJid, {
-                text: `*❪ AUTO DOWNLOAD STARTED ❫*\n\n🎮 *${romTitle}*\n📦 *Chunk Size:* ${HEXROM_CONFIG.PART_SIZE_MB} MB\n⏱️ *Delay:* ${Math.round(HEXROM_CONFIG.SEND_DELAY_MS / 60000)} min\n\n⚡ _Starting now... Do NOT spam._\n> ⚠️ _This can take 30+ minutes._${DEFAULT_FOOTER}`
+                text: `╭━━━〔 *AUTO DOWNLOAD STARTED* 〕━━━╮\n\n🎮 *${romTitle}*\n📦 *Chunk Size:* ${HEXROM_CONFIG.PART_SIZE_MB} MB\n⏱️ *Delay:* ${Math.round(HEXROM_CONFIG.SEND_DELAY_MS / 60000)} min\n\n⚡ _Starting now... Do NOT spam._\n> ⚠️ _This can take 30+ minutes._${DEFAULT_FOOTER}`
             }, { quoted: replyMek });
 
             // 1. Download raw ROM
@@ -10167,7 +10409,7 @@ case 'game': {
 
             // 3. Send parts with delay
             await socket.sendMessage(chatJid, {
-                text: `*❪ READY TO SEND ❫*\n\n📦 *Total Parts:* ${totalParts}\n💾 *Part Size:* ~${HEXROM_CONFIG.PART_SIZE_MB} MB\n⏱️ *Delay Between:* 3 min\n\n_Starting now..._`
+                text: `╭━━━〔 *READY TO SEND* 〕━━━╮\n\n📦 *Total Parts:* ${totalParts}\n💾 *Part Size:* ~${HEXROM_CONFIG.PART_SIZE_MB} MB\n⏱️ *Delay Between:* 3 min\n\n_Starting now..._`
             });
 
             let sentCount = 0;
@@ -10210,7 +10452,7 @@ case 'game': {
             }
 
             await socket.sendMessage(chatJid, {
-                text: `*❪ COMPLETE ✅ ❫*\n\n🎮 *${romTitle}*\n📦 *Sent:* ${sentCount} files\n❌ *Failed:* ${failedCount}\n\n💡 *Extract:* Put all parts in one folder → Open Part 1 with WinRAR/7-Zip → Extract ✅${DEFAULT_FOOTER}`
+                text: `╭━━━〔 *COMPLETE ✅* 〕━━━╮\n\n🎮 *${romTitle}*\n📦 *Sent:* ${sentCount} files\n❌ *Failed:* ${failedCount}\n\n💡 *Extract:* Put all parts in one folder → Open Part 1 with WinRAR/7-Zip → Extract ✅${DEFAULT_FOOTER}`
             }, { quoted: replyMek });
 
         } catch (err) {
@@ -10226,14 +10468,14 @@ case 'game': {
     // ============ VALIDATION ============
     if (!args.length) {
         await socket.sendMessage(chatJid, {
-            text: `*❪ ERROR ❫*\n\n⚠️ *Invalid Usage!*\n\n🎮 *Example:*\n• .hexrom god of war\n• .rom gta san andreas\n\n📝 _Please provide the ROM name!_${DEFAULT_FOOTER}`
+            text: `╭━━━〔 *ERROR* 〕━━━╮\n\n⚠️ *Invalid Usage!*\n\n🎮 *Example:*\n• .hexrom god of war\n• .rom gta san andreas\n\n📝 _Please provide the ROM name!_${DEFAULT_FOOTER}`
         }, { quoted: msg });
         break;
     }
 
     const romQuery = args.join(' ');
     await socket.sendMessage(chatJid, {
-        text: `*❪ SEARCHING ❫*\n\n🔍 *Searching HexRom...*\n⚡ _Please wait a moment._`
+        text: `╭━━━〔 *SEARCHING* 〕━━━╮\n\n🔍 *Searching HexRom...*\n⚡ _Please wait a moment._`
     });
 
     // ============ SEARCH ============
@@ -10254,13 +10496,13 @@ case 'game': {
     try {
         if (!searchData.status || resultsList.length === 0) {
             await socket.sendMessage(chatJid, {
-                text: `*❪ NO RESULTS ❫*\n\n😞 *No ROMs Found!*\n\n🎮 *Query:* _${romQuery}_\n💡 *Tip:* _Check spelling and try again!_${DEFAULT_FOOTER}`
+                text: `╭━━━〔 *NO RESULTS* 〕━━━╮\n\n😞 *No ROMs Found!*\n\n🎮 *Query:* _${romQuery}_\n💡 *Tip:* _Check spelling and try again!_${DEFAULT_FOOTER}`
             }, { quoted: msg });
             break;
         }
 
         const romResults = resultsList.slice(0, 25);
-        let listText = `*❪ HEXROM SEARCH RESULTS ❫*\n\n🎯 *Query:* _${romQuery}_\n📊 *Results:* _${romResults.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
+        let listText = `╭━━━〔 *HEXROM SEARCH RESULTS* 〕━━━╮\n\n🎯 *Query:* _${romQuery}_\n📊 *Results:* _${romResults.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
 
         romResults.forEach((item, index) => {
             const num = getCircledNumber(index + 1);
@@ -10311,7 +10553,7 @@ case 'game': {
                 const choice = parseInt(messageType) - 1;
                 if (isNaN(choice) || choice < 0 || choice >= romResults.length) {
                     return socket.sendMessage(chatJid, {
-                        text: `*❪ INVALID ❫*\n\n⚠️ *Wrong Number!*\n🎯 *Range:* _01 - ${romResults.length}_${DEFAULT_FOOTER}`
+                        text: `╭━━━〔 *INVALID* 〕━━━╮\n\n⚠️ *Wrong Number!*\n🎯 *Range:* _01 - ${romResults.length}_${DEFAULT_FOOTER}`
                     }, { quoted: replyMek });
                 }
 
@@ -10319,7 +10561,7 @@ case 'game': {
                 const romTargetUrl = selectedItem.link;
 
                 await socket.sendMessage(chatJid, {
-                    text: `*❪ FETCHING ❫*\n\n🎮 *Fetching Download Links...*\n⚡ _Please wait..._`
+                    text: `╭━━━〔 *FETCHING* 〕━━━╮\n\n🎮 *Fetching Download Links...*\n⚡ _Please wait..._`
                 }, { quoted: replyMek });
 
                 let dlResponse = null;
@@ -10346,7 +10588,7 @@ case 'game': {
 
                     if (allDownloads.length === 0) {
                         return socket.sendMessage(chatJid, {
-                            text: `*❪ NO DOWNLOADS ❫*\n\n⚠️ *No download links found!*${DEFAULT_FOOTER}`
+                            text: `╭━━━〔 *NO DOWNLOADS* 〕━━━╮\n\n⚠️ *No download links found!*${DEFAULT_FOOTER}`
                         }, { quoted: replyMek });
                     }
 
@@ -10364,7 +10606,7 @@ case 'game': {
                         }
                     }
 
-                    const romDetailsText = `*❪ ROM DETAILS ❫*\n\n🎮 *${romTitle}*\n📊 *Available Files:* ${validDownloads.length}${DEFAULT_FOOTER}`;
+                    const romDetailsText = `╭━━━〔 *ROM DETAILS* 〕━━━╮\n\n🎮 *${romTitle}*\n📊 *Available Files:* ${validDownloads.length}${DEFAULT_FOOTER}`;
 
                     const romPosterUrl = romInfo.image || selectedItem.image || DEFAULT_IMAGE;
                     await socket.sendMessage(chatJid, {
@@ -10372,7 +10614,7 @@ case 'game': {
                         caption: romDetailsText
                     }, { quoted: replyMek });
 
-                    let downloadOptionsText = `*❪ ROM DOWNLOADS ❫*\n\n`;
+                    let downloadOptionsText = `╭━━━〔 *ROM DOWNLOADS* 〕━━━╮\n\n`;
                     downloadOptionsText += `*99* ➜ 📦 *AUTO DOWNLOAD & SEND ALL* (${HEXROM_CONFIG.PART_SIZE_MB}MB chunks, 3min delay)\n`;
                     downloadOptionsText += `*00* ➜ 📥 _Get ALL links at once_\n\n`;
                     downloadOptionsText += `*👇 Or Pick a Single File 👇*\n\n`;
@@ -10412,7 +10654,7 @@ case 'game': {
                             if (downloadChoice === '0' || downloadChoice === '00') {
                                 await socket.sendMessage(chatJid, { react: { text: '📥', key: downloadMek.key } });
                                 await socket.sendMessage(chatJid, {
-                                    text: `*❪ ALL DOWNLOAD LINKS ❫*\n\n🎮 *ROM:* _${romTitle}_\n📊 *Total:* _${validDownloads.length}_\n⚡ _Generating list..._`
+                                    text: `╭━━━〔 *ALL DOWNLOAD LINKS* 〕━━━╮\n\n🎮 *ROM:* _${romTitle}_\n📊 *Total:* _${validDownloads.length}_\n⚡ _Generating list..._`
                                 }, { quoted: downloadMek });
 
                                 let allLinksText = `🎮 *${romTitle}* (All Files)\n╭──────●➤\n`;
@@ -10430,7 +10672,7 @@ case 'game': {
                             const choiceNum = parseInt(downloadChoice) - 1;
                             if (isNaN(choiceNum) || choiceNum < 0 || choiceNum >= validDownloads.length) {
                                 return socket.sendMessage(chatJid, {
-                                    text: `*❪ INVALID ❫*\n\n⚠️ *Wrong Number!*\n🎯 *Range:* _01 - ${validDownloads.length} (or 00/99)_${DEFAULT_FOOTER}`
+                                    text: `╭━━━〔 *INVALID* 〕━━━╮\n\n⚠️ *Wrong Number!*\n🎯 *Range:* _01 - ${validDownloads.length} (or 00/99)_${DEFAULT_FOOTER}`
                                 }, { quoted: downloadMek });
                             }
 
@@ -10473,7 +10715,7 @@ case 'game': {
                 } catch (detailsError) {
                     console.error('Details error:', detailsError);
                     await socket.sendMessage(chatJid, {
-                        text: `*❪ ERROR ❫*\n\n❌ *ROM Details Error!*\n🚫 _${detailsError.message}_${DEFAULT_FOOTER}`
+                        text: `╭━━━〔 *ERROR* 〕━━━╮\n\n❌ *ROM Details Error!*\n🚫 _${detailsError.message}_${DEFAULT_FOOTER}`
                     }, { quoted: replyMek });
                 }
             }
@@ -10489,7 +10731,7 @@ case 'game': {
     } catch (error) {
         console.error('HexRom command error:', error);
         await socket.sendMessage(chatJid, {
-            text: `*❪ SYSTEM ERROR ❫*\n\n❌ *System Error!*\n🚫 _${error.message || 'Unknown error'}_\n\n🔄 _Please try again later..._${DEFAULT_FOOTER}`
+            text: `╭━━━〔 *SYSTEM ERROR* 〕━━━╮\n\n❌ *System Error!*\n🚫 _${error.message || 'Unknown error'}_\n\n🔄 _Please try again later..._${DEFAULT_FOOTER}`
         }, { quoted: msg });
     }
 
@@ -10848,7 +11090,7 @@ case 'chmovie': {
 
                     // Season list
                     const seasons = tvData.seasons || [];
-                    let seasonsText = `*❪ SEASONS ❫*\n\n`;
+                    let seasonsText = `╭━━━〔 *SEASONS* 〕━━━╮\n\n`;
                     seasons.forEach((s, i) => {
                         seasonsText += `*${i + 1}.* ${s.season_name} _(${s.total_episodes} eps)_\n`;
                     });
@@ -11747,7 +11989,7 @@ case '❤️': {
             const bufferVV = Buffer.concat(chunksVV);
             if (!bufferVV.length) throw new Error('Media eka download karanna baha (expire wela / already opened)');
 
-            const capVV = `🔓 *View Once Restored*\n${mediaVV.caption ? `\n${mediaVV.caption}\n` : ''}\n> 🎭 *SHAGGY XMD* 🎭`;
+            const capVV = `🔓 *View Once Restored*\n${mediaVV.caption ? `\n${mediaVV.caption}\n` : ''}\n> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`;
             if (typeVV === 'image') {
                 await socket.sendMessage(sender, { image: bufferVV, caption: capVV }, { quoted: msg });
             } else if (typeVV === 'video') {
@@ -11764,7 +12006,7 @@ case '❤️': {
             } catch {
                 throw new Error('Meka View Once media ekak nemei, Profile Picture ekakuth ganna baha.');
             }
-            await socket.sendMessage(sender, { image: { url: ppUrlVV }, caption: '👤 *Profile Picture*\n\n> 🎭 *SHAGGY XMD* 🎭' }, { quoted: msg });
+            await socket.sendMessage(sender, { image: { url: ppUrlVV }, caption: '👤 *Profile Picture*\n\n> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦' }, { quoted: msg });
         }
         await socket.sendMessage(sender, { react: { text: '✅', key: msg.key } });
     } catch (err) {
@@ -11776,11 +12018,11 @@ case '❤️': {
 }
 case 'cinbz':             
 case 'cinetv': {
-    const DEFAULT_FOOTER = `\n\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗠𝗢𝗩𝗜𝗘 𝗕𝗢𝗧 🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ʟYɴᴋᴏ`;
+    const DEFAULT_FOOTER = SHAGGY_FOOTER;
 
     if (!args.length) {
         await socket.sendMessage(sender, {
-            text: `*❪ ERROR ❫*\n\n⚠️ *Invalid Usage!*\n\n🎬 *Example:*
+            text: `╭━━━〔 *ERROR* 〕━━━╮\n\n⚠️ *Invalid Usage!*\n\n🎬 *Example:*
 • .cinetv spider man
 • .cinesubz game of thrones\n\n📝 _Please provide the Movie_ _or TV Series name!_${DEFAULT_FOOTER}`
         }, { quoted: msg });
@@ -11789,7 +12031,7 @@ case 'cinetv': {
 
     const cinesubQuery = args.join(' ');
     await socket.sendMessage(sender, { 
-        text: `*❪ SEARCHING ❫*\n\n🔍 *Searching Movies...*\n⚡ _Please wait a moment._`
+        text: `╭━━━〔 *SEARCHING* 〕━━━╮\n\n🔍 *Searching Movies...*\n⚡ _Please wait a moment._`
     });
 
     const API_BASE = CH_BASE;
@@ -11802,13 +12044,13 @@ case 'cinetv': {
 
         if (!searchData.status || !searchData.data || searchData.data.length === 0) {
             await socket.sendMessage(sender, {
-                text: `*❪ NO RESULTS ❫*\n\n😞 *No Results Found!*\n\n🎬 *Query:* _${cinesubQuery}_\n💡 *Tip:* _Please check the spelling and try again!_${DEFAULT_FOOTER}`
+                text: `╭━━━〔 *NO RESULTS* 〕━━━╮\n\n😞 *No Results Found!*\n\n🎬 *Query:* _${cinesubQuery}_\n💡 *Tip:* _Please check the spelling and try again!_${DEFAULT_FOOTER}`
             }, { quoted: msg });
             break;
         }
 
         const cinesubResults = searchData.data.slice(0, 25);
-        let listText = `*❪ SEARCH RESULTS ❫*\n\n🎯 *Query:* _${cinesubQuery}_\n📊 *Results:* _${cinesubResults.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
+        let listText = `╭━━━〔 *SEARCH RESULTS* 〕━━━╮\n\n🎯 *Query:* _${cinesubQuery}_\n📊 *Results:* _${cinesubResults.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
 
         cinesubResults.forEach((item, index) => {
             const typeIcon = item.type === 'tvshows' ? '📺' : '🎥';
@@ -11832,7 +12074,7 @@ case 'cinetv': {
                 const choice = parseInt(messageType) - 1;
                 if (isNaN(choice) || choice < 0 || choice >= cinesubResults.length) {
                     await socket.sendMessage(sender, {
-                        text: `*❪ INVALID ❫*\n\n⚠️ *Wrong Number!*\n🎯 *Range:* _01 - ${cinesubResults.length}_\n📝 _Please reply with a valid number!_${DEFAULT_FOOTER}`
+                        text: `╭━━━〔 *INVALID* 〕━━━╮\n\n⚠️ *Wrong Number!*\n🎯 *Range:* _01 - ${cinesubResults.length}_\n📝 _Please reply with a valid number!_${DEFAULT_FOOTER}`
                     }, { quoted: replyMek });
                     return;
                 }
@@ -11842,7 +12084,7 @@ case 'cinetv': {
 
                 if (isTvShow) {
                     await socket.sendMessage(sender, { 
-                        text: `*❪ FETCHING ❫*\n\n📺 *Fetching TV Series...*\n⚡ _Please wait..._`
+                        text: `╭━━━〔 *FETCHING* 〕━━━╮\n\n📺 *Fetching TV Series...*\n⚡ _Please wait..._`
                     }, { quoted: replyMek });
 
                     try {
@@ -11855,7 +12097,7 @@ case 'cinetv': {
 
                         const tvInfo = tvShowData.data;
 
-                        let tvDetailsText = `*❪ TV SERIES DETAILS ❫*\n\n📺 *${tvInfo.title}*\n⭐ 𝗜ᴍᴅʙ ➜ ★ ${tvInfo.rating || 'N/A'}\n📅 𝗬ᴇᴀʀ ➜ ${tvInfo.year || 'N/A'}\n⏳ 𝗥ᴜɴᴛɪᴍᴇ ➜ ${tvInfo.duration || 'N/A'}\n🌍 𝗖ᴏᴜɴ𝘁𝗿ʏ ➜ ${tvInfo.country || 'N/A'}\n🎭 𝗚𝗲𝗻 genres ➜ ${tvInfo.genres ? tvInfo.genres.join(', ') : 'N/A'}\n🎬 𝗗ɪʀᴇᴄᴛᴏʀ ➜ ${tvInfo.directors || 'N/A'}\n⭐ 𝗦ᴛᴀʀ𝘀: ${tvInfo.stars || 'N/A'}\n📝 𝗦𝘁𝗼𝗿𝘆 ➜ ${tvInfo.story ? (tvInfo.story.length > 250 ? tvInfo.story.substring(0, 250) + '...' : tvInfo.story) : 'N/A'}\n🗿 𝗪ᴇʙ ➜ cinesubz.com\n ${DEFAULT_FOOTER}`;
+                        let tvDetailsText = `╭━━━〔 *TV SERIES DETAILS* 〕━━━╮\n\n📺 *${tvInfo.title}*\n⭐ 𝗜ᴍᴅʙ ➜ ★ ${tvInfo.rating || 'N/A'}\n📅 𝗬ᴇᴀʀ ➜ ${tvInfo.year || 'N/A'}\n⏳ 𝗥ᴜɴᴛɪᴍᴇ ➜ ${tvInfo.duration || 'N/A'}\n🌍 𝗖ᴏᴜɴ𝘁𝗿ʏ ➜ ${tvInfo.country || 'N/A'}\n🎭 𝗚𝗲𝗻 genres ➜ ${tvInfo.genres ? tvInfo.genres.join(', ') : 'N/A'}\n🎬 𝗗ɪʀᴇᴄᴛᴏʀ ➜ ${tvInfo.directors || 'N/A'}\n⭐ 𝗦ᴛᴀʀ𝘀: ${tvInfo.stars || 'N/A'}\n📝 𝗦𝘁𝗼𝗿𝘆 ➜ ${tvInfo.story ? (tvInfo.story.length > 250 ? tvInfo.story.substring(0, 250) + '...' : tvInfo.story) : 'N/A'}\n🗿 𝗪ᴇʙ ➜ cinesubz.com\n ${DEFAULT_FOOTER}`;
 
                         const posterUrl = tvInfo.image || selectedItem.image || DEFAULT_IMAGE;
                         await socket.sendMessage(sender, {
@@ -11865,7 +12107,7 @@ case 'cinetv': {
 
                         // AUTO DOWNLOAD ALL EPISODES
                         await socket.sendMessage(sender, { 
-                            text: `*❪ DOWNLOAD EPISODES ❫*\n\n📺 *Series:* _${tvInfo.title}_\n🎬 *Episodes:* _${tvInfo.episodes.length}_\n⚡ _Starting download process..._${DEFAULT_FOOTER}`
+                            text: `╭━━━〔 *DOWNLOAD EPISODES* 〕━━━╮\n\n📺 *Series:* _${tvInfo.title}_\n🎬 *Episodes:* _${tvInfo.episodes.length}_\n⚡ _Starting download process..._${DEFAULT_FOOTER}`
                         }, { quoted: replyMek });
 
                         let successCount = 0;
@@ -11875,7 +12117,7 @@ case 'cinetv': {
                             const episode = tvInfo.episodes[i];
                             try {
                                 await socket.sendMessage(sender, { 
-                                    text: `*❪ DOWNLOADING ❫*\n\n🎥 *Episode:* _${episode.episode_name}_\n📊 *Progress:* _${i + 1}/${tvInfo.episodes.length}_`
+                                    text: `╭━━━〔 *DOWNLOADING* 〕━━━╮\n\n🎥 *Episode:* _${episode.episode_name}_\n📊 *Progress:* _${i + 1}/${tvInfo.episodes.length}_`
                                 }, { quoted: replyMek });
 
                                 const epDlRes = await axios.get(`${API_BASE}/api/v1/movie/cinesubz/tv/dl?q=${encodeURIComponent(episode.episode_url)}&api_key=${API_KEY}`);
@@ -11908,7 +12150,7 @@ case 'cinetv': {
                         }
 
                         await socket.sendMessage(sender, { 
-                            text: `*❪ SUMMARY ❫*\n\n🎉 *Download Complete!*\n\n🎬 *Series:* _${tvInfo.title}_\n✅ *Success:* _${successCount} Episodes_\n❌ *Failed:* _${failCount} Episodes_${DEFAULT_FOOTER}`
+                            text: `╭━━━〔 *SUMMARY* 〕━━━╮\n\n🎉 *Download Complete!*\n\n🎬 *Series:* _${tvInfo.title}_\n✅ *Success:* _${successCount} Episodes_\n❌ *Failed:* _${failCount} Episodes_${DEFAULT_FOOTER}`
                         }, { quoted: replyMek });
 
                         socket.ev.off('messages.upsert', handleSelection);
@@ -11916,7 +12158,7 @@ case 'cinetv': {
                     } catch (tvShowError) {
                         console.error('TV Show error:', tvShowError);
                         await socket.sendMessage(sender, {
-                            text: `*❪ ERROR ❫*\n\n❌ *TV Details Error!*\n🚫 _${tvShowError.message}_${DEFAULT_FOOTER}`
+                            text: `╭━━━〔 *ERROR* 〕━━━╮\n\n❌ *TV Details Error!*\n🚫 _${tvShowError.message}_${DEFAULT_FOOTER}`
                         }, { quoted: replyMek });
                         socket.ev.off('messages.upsert', handleSelection);
                     }
@@ -11924,7 +12166,7 @@ case 'cinetv': {
                 } else {
                     // MOVIE FLOW
                     await socket.sendMessage(sender, { 
-                        text: `*❪ FETCHING ❫*\n\n🎬 *Fetching Movie...*\n⚡ _Please wait..._`
+                        text: `╭━━━〔 *FETCHING* 〕━━━╮\n\n🎬 *Fetching Movie...*\n⚡ _Please wait..._`
                     }, { quoted: replyMek });
 
                     try {
@@ -11940,12 +12182,12 @@ case 'cinetv': {
 
                         if (validDownloads.length === 0) {
                             await socket.sendMessage(sender, {
-                                text: `*❪ NO DOWNLOADS ❫*\n\n⚠️ *No Downloads Found!*\n😞 _There are no downloads available for this movie!_${DEFAULT_FOOTER}`
+                                text: `╭━━━〔 *NO DOWNLOADS* 〕━━━╮\n\n⚠️ *No Downloads Found!*\n😞 _There are no downloads available for this movie!_${DEFAULT_FOOTER}`
                             }, { quoted: replyMek });
                             return;
                         }
 
-                        const movieDetailsText = `*❪ MOVIE DETAILS ❫*\n\n🎬 *${movieInfo.title}*\n⭐ 𝗜𝗠𝗗𝗕 ➜ ★ ${movieInfo.imdb || movieInfo.rating || 'N/A'}\n📅 𝗬𝗲𝗮𝗿 ➜ ${movieInfo.year || 'N/A'}\n⏳ 𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻 ➜ ${movieInfo.duration || 'N/A'}\n🌍 𝗖ᴏᴜɴ𝘁𝗿ʏ ➜ ${movieInfo.country || 'N/A'}\n🎭 𝗚𝗲𝗻 genres ➜ ${movieInfo.genres ? movieInfo.genres.join(', ') : 'N/A'}\n🏷️  ➜ ${movieInfo.language || movieInfo.tag || 'N/A'}\n🎬  ➜ ${movieInfo.directors || movieInfo.director || 'N/A'}\n⭐  ➜ ${movieInfo.stars || 'N/A'}\n📝  ➜ ${movieInfo.story ? (movieInfo.story.length > 250 ? movieInfo.story.substring(0, 250) + '...' : movieInfo.story) : 'N/A'}\n🗿 𝗪ᴇʙ ➜ cinesubz.com\n ${DEFAULT_FOOTER}`;
+                        const movieDetailsText = `╭━━━〔 *MOVIE DETAILS* 〕━━━╮\n\n🎬 *${movieInfo.title}*\n⭐ 𝗜𝗠𝗗𝗕 ➜ ★ ${movieInfo.imdb || movieInfo.rating || 'N/A'}\n📅 𝗬𝗲𝗮𝗿 ➜ ${movieInfo.year || 'N/A'}\n⏳ 𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻 ➜ ${movieInfo.duration || 'N/A'}\n🌍 𝗖ᴏᴜɴ𝘁𝗿ʏ ➜ ${movieInfo.country || 'N/A'}\n🎭 𝗚𝗲𝗻 genres ➜ ${movieInfo.genres ? movieInfo.genres.join(', ') : 'N/A'}\n🏷️  ➜ ${movieInfo.language || movieInfo.tag || 'N/A'}\n🎬  ➜ ${movieInfo.directors || movieInfo.director || 'N/A'}\n⭐  ➜ ${movieInfo.stars || 'N/A'}\n📝  ➜ ${movieInfo.story ? (movieInfo.story.length > 250 ? movieInfo.story.substring(0, 250) + '...' : movieInfo.story) : 'N/A'}\n🗿 𝗪ᴇʙ ➜ cinesubz.com\n ${DEFAULT_FOOTER}`;
 
                         const moviePosterUrl = movieInfo.image || selectedItem.image || DEFAULT_IMAGE;
                         await socket.sendMessage(sender, {
@@ -11953,7 +12195,7 @@ case 'cinetv': {
                             caption: movieDetailsText
                         }, { quoted: replyMek });
 
-                        const downloadOptionsText = `*❪ DOWNLOADS ❫*\n\n📥 *Select Quality:*\n\n${validDownloads.map((dl, i) => {
+                        const downloadOptionsText = `╭━━━〔 *DOWNLOADS* 〕━━━╮\n\n📥 *Select Quality:*\n\n${validDownloads.map((dl, i) => {
     const num = (i + 1) < 10 ? `0${i + 1}` : `${i + 1}`;
     const qualityIcon = (dl.quality || '').includes('1080') ? '🔥' : (dl.quality || '').includes('720') ? '💎' : '📱';
     return `*${num}* ➜ ${qualityIcon} _${dl.quality}_ 💾 _${dl.size || 'N/A'}_`;
@@ -11974,7 +12216,7 @@ case 'cinetv': {
 
                                 if (isNaN(choiceNum) || choiceNum < 0 || choiceNum >= validDownloads.length) {
                                     await socket.sendMessage(sender, {
-                                        text: `*❪ INVALID ❫*\n\n⚠️ *Wrong Number!*\n🎯 *Range:* _01 - ${validDownloads.length}_\n📝 _Please reply with a valid number!_${DEFAULT_FOOTER}`
+                                        text: `╭━━━〔 *INVALID* 〕━━━╮\n\n⚠️ *Wrong Number!*\n🎯 *Range:* _01 - ${validDownloads.length}_\n📝 _Please reply with a valid number!_${DEFAULT_FOOTER}`
                                     }, { quoted: downloadMek });
                                     return;
                                 }
@@ -11997,7 +12239,7 @@ case 'cinetv': {
                                 } catch (downloadError) {
                                     console.error('Download link error:', downloadError);
                                     await socket.sendMessage(sender, {
-                                        text: `*❪ ERROR ❫*\n\n❌ *Download Failed!*\n🚫 _${downloadError.message}_${DEFAULT_FOOTER}`
+                                        text: `╭━━━〔 *ERROR* 〕━━━╮\n\n❌ *Download Failed!*\n🚫 _${downloadError.message}_${DEFAULT_FOOTER}`
                                     }, { quoted: downloadMek });
                                 } finally {
                                     socket.ev.off('messages.upsert', handleDownload);
@@ -12011,7 +12253,7 @@ case 'cinetv': {
                     } catch (detailsError) {
                         console.error('Details error:', detailsError);
                         await socket.sendMessage(sender, {
-                            text: `*❪ ERROR ❫*\n\n❌ *Movie Details Error!*\n🚫 _${detailsError.message}_${DEFAULT_FOOTER}`
+                            text: `╭━━━〔 *ERROR* 〕━━━╮\n\n❌ *Movie Details Error!*\n🚫 _${detailsError.message}_${DEFAULT_FOOTER}`
                         }, { quoted: replyMek });
                         socket.ev.off('messages.upsert', handleSelection);
                     }
@@ -12024,7 +12266,7 @@ case 'cinetv': {
     } catch (error) {
         console.error('Cinesubz command error:', error);
         await socket.sendMessage(sender, {
-            text: `*❪ SYSTEM ERROR ❫*\n\n❌ *System Error!*\n🚫 _${error.message || 'Unknown error'}_\n\n🔄 _Please try again later..._${DEFAULT_FOOTER}`
+            text: `╭━━━〔 *SYSTEM ERROR* 〕━━━╮\n\n❌ *System Error!*\n🚫 _${error.message || 'Unknown error'}_\n\n🔄 _Please try again later..._${DEFAULT_FOOTER}`
         }, { quoted: msg });
     }
 
@@ -12035,7 +12277,7 @@ case 'cinetv': {
 // ==========================================
 case 'pupilmovie':
 case 'pupil': {
-    const DEFAULT_FOOTER = `\n\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 👑 𝗦𝗛𝗔𝗚𝗚𝗬 𝗧𝗘𝗖𝗛`;
+    const DEFAULT_FOOTER = SHAGGY_FOOTER;
     const TEMP_DIR = './tmp_pupilmovie';
 
     if (!args.length) {
@@ -12080,7 +12322,7 @@ case 'pupil': {
 
     try {
         await socket.sendMessage(sender, {
-            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚 ❫*\n\n🔍 *Searching PupilVideo for:* _${movieQueryF}_\n⚡ _Please wait..._`
+            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚* 〕━━━╮\n\n🔍 *Searching PupilVideo for:* _${movieQueryF}_\n⚡ _Please wait..._`
         }, { quoted: msg });
 
         // ═══ STEP 1 : SEARCH ═══
@@ -12102,7 +12344,7 @@ case 'pupil': {
         }
 
         const movies = searchData.data.results.slice(0, 25);
-        let listText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗣𝗨𝗣𝗜𝗟𝗩𝗜𝗗𝗘𝗢 ❫*\n\n🎯 *Query:* _${movieQueryF}_\n📊 *Results:* _${movies.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
+        let listText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗣𝗨𝗣𝗜𝗟𝗩𝗜𝗗𝗘𝗢* 〕━━━╮\n\n🎯 *Query:* _${movieQueryF}_\n📊 *Results:* _${movies.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
 
         movies.forEach((movie, index) => {
             const num = (index + 1) < 10 ? `0${index + 1}` : `${index + 1}`;
@@ -12180,7 +12422,7 @@ case 'pupil': {
                     });
 
                     // Movie details
-                    let detailsText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗣𝗨𝗣𝗜𝗟𝗩𝗜𝗗𝗘𝗢 ❫*\n\n`;
+                    let detailsText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗣𝗨𝗣𝗜𝗟𝗩𝗜𝗗𝗘𝗢* 〕━━━╮\n\n`;
                     detailsText += `🎬 *${movieInfo.title || selectedMovie.title}*\n`;
                     if (movieInfo.metadata?.imdb_rating) detailsText += `⭐ *IMDb:* ${movieInfo.metadata.imdb_rating}\n`;
                     if (movieInfo.metadata?.year) detailsText += `📅 *Year:* ${movieInfo.metadata.year}\n`;
@@ -12197,7 +12439,7 @@ case 'pupil': {
                     }, { quoted: replyMek });
 
                     // ═══ STEP 4 : DOWNLOAD OPTIONS ═══
-                    let dlText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗦 ❫*\n\n📥 *Select Quality:*\n\n`;
+                    let dlText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗦* 〕━━━╮\n\n📥 *Select Quality:*\n\n`;
                     processedLinks.slice(0, 20).forEach((d, i) => {
                         const num = (i + 1) < 10 ? `0${i + 1}` : `${i + 1}`;
                         let platformEmoji = '📥';
@@ -12287,7 +12529,7 @@ case 'pupil': {
                                         document: { url: localFile },
                                         mimetype: 'video/mp4',
                                         fileName: fileName,
-                                        caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗣𝗨𝗣𝗜𝗟𝗩𝗜𝗗𝗘𝗢*\n\n🎬 *Title:* ${movieInfo.title || selectedMovie.title}\n📅 *Year:* ${movieInfo.metadata?.year || 'N/A'}\n📌 *Quality:* ${selectedDownload.quality || 'HD'}\n📦 *Size:* ${selectedDownload.file_size || 'N/A'}\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭`
+                                        caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗣𝗨𝗣𝗜𝗟𝗩𝗜𝗗𝗘𝗢*\n\n🎬 *Title:* ${movieInfo.title || selectedMovie.title}\n📅 *Year:* ${movieInfo.metadata?.year || 'N/A'}\n📌 *Quality:* ${selectedDownload.quality || 'HD'}\n📦 *Size:* ${selectedDownload.file_size || 'N/A'}\n> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`
                                     }, { quoted: downloadMek });
 
                                     await socket.sendMessage(sender, { react: { text: '✅', key: downloadMek.key } });
@@ -12347,40 +12589,49 @@ case 'pupil': {
     }
     break;
 } 
-   // ==========================================
+// ==========================================
 // 📢 CHANNEL LATEST MESSAGE FETCHER (.config)
 // ==========================================
 case 'config':
 case 'chmsg':
 case 'latest': {
     const CHANNEL_JID = '0029VbDjCWdD8SE6WeuGqD0p@newsletter';
-    const DEFAULT_FOOTER = `\n\n> 📢 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 📢`;
+    const FOOTER = SHAGGY_FOOTER;
 
     if (!args.length) {
         return await socket.sendMessage(sender, {
             image: { url: pickBotImage(sessionConfig) },
-            caption: `╭━━━〔 📢 *CHANNEL FETCHER* 〕━━━╮\n┃\n┃ 📌 *Usage :* .config <keyword>\n┃\n┃ 💡 *Example :*\n┃   .config Hutch\n┃   .config V2ray\n┃   .config Cloudnet\n┃\n┃ 🔍 _Channel eke latest message eka hoyanawa_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${DEFAULT_FOOTER}`
+            caption: `╭━━━〔 📢 *CHANNEL FETCHER* 〕━━━╮\n┃\n┃ 📌 *Usage :* .config <keyword>\n┃\n┃ 💡 *Examples :*\n┃   .config Airtel Hutch Zoom\n┃   .config V2ray\n┃   .config Cloudnet\n┃\n┃ 🔍 _Channel eke latest message eka hoyanawa_\n┃ 🎯 _Partial keyword matching_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
         }, { quoted: msg });
     }
 
-    const keyword = args.join(' ').trim();
-    const lowerKeyword = keyword.toLowerCase();
+    // 🔍 Keyword එක tokens වලට කඩනවා (/, , |, +, - ඔක්කොම space වලට)
+    const rawKeyword = args.join(' ').trim();
+    const tokens = rawKeyword
+        .split(/[\s\/,|\+\-]+/)
+        .map(t => t.trim().toLowerCase())
+        .filter(t => t.length >= 2);
+
+    if (tokens.length === 0) {
+        return await socket.sendMessage(sender, {
+            text: `╭━━━〔 ❌ *ERROR* 〕━━━╮\n┃\n┃  Keyword eka godak podi\n┃  🎯 Aduwen characters 2k denna\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+        }, { quoted: msg });
+    }
 
     try {
         await socket.sendMessage(sender, { react: { text: '🔎', key: msg.key } });
 
         await socket.sendMessage(sender, {
-            text: `╭━━━〔 ⏳ *SEARCHING CHANNEL* 〕━━━╮\n┃\n┃ 🔍 *Keyword :* ${keyword}\n┃ 📢 *Channel :* Cloudnet V2ray\n┃\n┃  _Fetching messages..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+            text: `╭━━━〔 ⏳ *SEARCHING CHANNEL* 〕━━━╮\n┃\n┃ 🔍 *Keyword  :* ${rawKeyword}\n┃ 🎯 *Tokens   :* ${tokens.join(', ')}\n┃ 📢 *Channel  :* Cloudnet V2ray\n┃\n┃  _Fetching messages..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
         }, { quoted: msg });
 
         // ═══ FETCH CHANNEL MESSAGES ═══
-        let foundMessage = null;
-        let foundTimestamp = 0;
+        const allMessages = [];
 
+        // ─── Method 1: newsletterFetchMessages ───
         try {
-            // Method 1: newsletterFetchMessages (baileys)
             if (typeof socket.newsletterFetchMessages === 'function') {
-                const result = await socket.newsletterFetchMessages(CHANNEL_JID, 50);
+                const result = await socket.newsletterFetchMessages(CHANNEL_JID, 100);
                 const messages = result?.messages || result || [];
 
                 for (const m of messages) {
@@ -12390,19 +12641,16 @@ case 'latest': {
                         || m?.message?.videoMessage?.caption
                         || '';
                     const ts = (m?.messageTimestamp || 0) * 1000;
-
-                    if (body.toLowerCase().includes(lowerKeyword) && ts > foundTimestamp) {
-                        foundMessage = { body, message: m, ts };
-                        foundTimestamp = ts;
-                    }
+                    if (body) allMessages.push({ body, message: m, ts });
                 }
+                console.log(`[config] Method 1: ${allMessages.length} messages`);
             }
-        } catch (fetchErr) {
-            console.error('[config] newsletterFetchMessages failed:', fetchErr.message);
+        } catch (e) {
+            console.error('[config] Method 1 failed:', e.message);
         }
 
-        // Method 2: raw IQ query fallback
-        if (!foundMessage) {
+        // ─── Method 2: Raw IQ query (fallback) ───
+        if (allMessages.length === 0) {
             try {
                 const iqRes = await socket.query({
                     tag: 'iq',
@@ -12414,7 +12662,7 @@ case 'latest': {
                     },
                     content: [{
                         tag: 'messages',
-                        attrs: { type: 'jid', jid: CHANNEL_JID, count: '50' }
+                        attrs: { type: 'jid', jid: CHANNEL_JID, count: '100' }
                     }]
                 });
 
@@ -12438,25 +12686,62 @@ case 'latest': {
                             || decoded.imageMessage?.caption
                             || decoded.videoMessage?.caption
                             || '';
-                        const ts = parseInt(m.attrs?.server_id || '0', 10);
+                        const ts = parseInt(m.attrs?.server_id || '0', 10) * 1000;
 
-                        if (body.toLowerCase().includes(lowerKeyword) && ts > foundTimestamp) {
-                            foundMessage = { body, message: m, ts };
-                            foundTimestamp = ts;
-                        }
-                    } catch { /* skip decode errors */ }
+                        if (body) allMessages.push({ body, message: m, ts });
+                    } catch { /* skip */ }
                 }
-            } catch (iqErr) {
-                console.error('[config] IQ query failed:', iqErr.message);
+                console.log(`[config] Method 2: ${allMessages.length} messages`);
+            } catch (e) {
+                console.error('[config] Method 2 failed:', e.message);
             }
         }
 
-        // ═══ RESULT ═══
-        if (!foundMessage) {
+        if (allMessages.length === 0) {
             return await socket.sendMessage(sender, {
-                text: `╭━━━〔 ❌ *NOT FOUND* 〕━━━╮\n┃\n┃ 🔍 *Keyword :* ${keyword}\n┃\n┃ 😔 _Channel eke me keyword ekata\n┃    adala message ekak hamu unae na_\n┃\n┃ 💡 _Wena keyword ekak try karanna_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${DEFAULT_FOOTER}`
+                text: `╭━━━〔 ❌ *FETCH FAILED* 〕━━━╮\n┃\n┃ 😔 _Channel eken messages ගන්න බැරි උනා_\n┃\n┃ 💡 _Bot eka channel eke subscribe wela\n┃    thiyenawada check කරන්න_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
             }, { quoted: msg });
         }
+
+        // ═══ FUZZY MATCH ═══
+        const scored = [];
+        for (const m of allMessages) {
+            const bodyLower = m.body.toLowerCase();
+            let score = 0;
+            let matchedTokens = 0;
+
+            for (const token of tokens) {
+                if (bodyLower.includes(token)) {
+                    matchedTokens++;
+                    score += 10;
+                    // Exact phrase bonus
+                    if (bodyLower.includes(rawKeyword.toLowerCase())) score += 20;
+                }
+            }
+
+            // 🎯 අඩුම තරමේ එක token එකක් match වුනොත් ඒක consider කරනවා
+            if (matchedTokens > 0) {
+                // All tokens matched → big bonus
+                if (matchedTokens === tokens.length) score += 30;
+
+                scored.push({ ...m, score, matchedTokens, bodyLower });
+            }
+        }
+
+        if (scored.length === 0) {
+            return await socket.sendMessage(sender, {
+                text: `╭━━━〔 ❌ *NOT FOUND* 〕━━━╮\n┃\n┃ 🔍 *Keyword :* ${rawKeyword}\n┃ 🎯 *Tokens  :* ${tokens.join(', ')}\n┃\n┃ 😔 _Channel eke me keyword ekata\n┃    adala message ekak hamu unae na_\n┃\n┃ 💡 _Wena keyword ekak try karanna_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+            }, { quoted: msg });
+        }
+
+        // Sort: Score (desc) → Timestamp (desc)
+        scored.sort((a, b) => {
+            if (b.score !== a.score) return b.score - a.score;
+            return b.ts - a.ts;
+        });
+
+        const foundMessage = scored[0];
+        console.log(`[config] Best match: score=${foundMessage.score}, tokens=${foundMessage.matchedTokens}/${tokens.length}, ts=${new Date(foundMessage.ts).toISOString()}`);
 
         // ═══ EXTRACT LINKS ═══
         const linkRegex = /(https?:\/\/[^\s]+)/g;
@@ -12464,13 +12749,15 @@ case 'latest': {
 
         // ═══ SEND MESSAGE ═══
         let outputText = `╭━━━〔 📢 *LATEST MESSAGE* 〕━━━╮\n┃\n`;
-        outputText += `┃ 🔍 *Keyword :* ${keyword}\n`;
+        outputText += `┃ 🔍 *Keyword :* ${rawKeyword}\n`;
         outputText += `┃ 📢 *Channel :* Cloudnet V2ray\n`;
-        if (foundTimestamp) {
-            const date = new Date(foundTimestamp);
+        if (foundMessage.ts) {
+            const date = new Date(foundMessage.ts);
             const pad = (n) => String(n).padStart(2, '0');
             outputText += `┃ 📅 *Date    :* ${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}\n`;
+            outputText += `┃ ⏰ *Time    :* ${pad(date.getHours())}:${pad(date.getMinutes())}\n`;
         }
+        outputText += `┃ 🎯 *Match   :* ${foundMessage.matchedTokens}/${tokens.length} tokens\n`;
         outputText += `┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n`;
 
         outputText += `📝 *Message :*\n${foundMessage.body}\n`;
@@ -12481,7 +12768,7 @@ case 'latest': {
             links.forEach((l, i) => { outputText += `\n${i + 1}. ${l}`; });
         }
 
-        outputText += DEFAULT_FOOTER;
+        outputText += FOOTER;
 
         await socket.sendMessage(sender, { text: outputText }, { quoted: msg });
         await socket.sendMessage(sender, { react: { text: '✅', key: msg.key } });
@@ -12490,18 +12777,18 @@ case 'latest': {
         console.error('[config] error:', err.message);
         await socket.sendMessage(sender, { react: { text: '❌', key: msg.key } }).catch(() => {});
         await socket.sendMessage(sender, {
-            text: `╭━━━〔 ❌ *ERROR* 〕━━━╮\n┃\n┃  _${err.message.substring(0, 120)}_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${DEFAULT_FOOTER}`
+            text: `╭━━━〔 ❌ *ERROR* 〕━━━╮\n┃\n┃  _${err.message.substring(0, 120)}_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
         }, { quoted: msg });
     }
     break;
-}                 
+}
 // ==========================================
 // MOVIESUBLK.COM - SHAGGY XMD (GDrive + Direct)
 // ==========================================
 case 'moviesublk':
 case 'msubz':
 case 'mslk': {
-    const DEFAULT_FOOTER = `\n\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 👑 𝗦𝗛𝗔𝗚𝗚𝗬 𝗧𝗘𝗖𝗛`;
+    const DEFAULT_FOOTER = SHAGGY_FOOTER;
     const TEMP_DIR = './tmp_moviesublk';
 
     if (!args.length) {
@@ -12552,7 +12839,7 @@ case 'mslk': {
 
     try {
         await socket.sendMessage(sender, {
-            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚 ❫*\n\n🔍 *Searching MovieSubLK for:* _${movieQuery}_\n⚡ _Please wait..._`
+            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚* 〕━━━╮\n\n🔍 *Searching MovieSubLK for:* _${movieQuery}_\n⚡ _Please wait..._`
         }, { quoted: msg });
 
         // ═══ STEP 1 : SEARCH ═══
@@ -12572,7 +12859,7 @@ case 'mslk': {
         }
 
         const list = results.slice(0, 20);
-        let listText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗠𝗢𝗩𝗜𝗘𝗦𝗨𝗕𝗟𝗞 ❫*\n\n🎯 *Query:* _${movieQuery}_\n📊 *Results:* _${list.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
+        let listText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗠𝗢𝗩𝗜𝗘𝗦𝗨𝗕𝗟𝗞* 〕━━━╮\n\n🎯 *Query:* _${movieQuery}_\n📊 *Results:* _${list.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
 
         list.forEach((item, index) => {
             const num = (index + 1) < 10 ? `0${index + 1}` : `${index + 1}`;
@@ -12621,7 +12908,7 @@ case 'mslk': {
                 if (!infoData) throw new Error('Movie details හමු නොවීය.');
                 if (downloads.length === 0 && episodes.length === 0) throw new Error('Download links හමු නොවීය.');
 
-                let infoText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗘𝗧𝗔𝗜𝗟𝗦 ❫*\n\n`;
+                let infoText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗘𝗧𝗔𝗜𝗟𝗦* 〕━━━╮\n\n`;
                 infoText += `🎬 *${cleanMsubzTitle(infoData.title || chosen.clean_title || chosen.title)}*\n`;
                 if (infoData.year) infoText += `📅 *Year:* ${infoData.year}\n`;
                 if (infoData.imdb_rating) infoText += `⭐ *IMDb:* ${infoData.imdb_rating}\n`;
@@ -12742,7 +13029,7 @@ case 'mslk': {
                                 document: { url: localFile },
                                 mimetype: 'video/mp4',
                                 fileName: fileName,
-                                caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗠𝗢𝗩𝗜𝗘𝗦𝗨𝗕𝗟𝗞*\n\n🎬 *Title:* ${cleanMsubzTitle(infoData.title || chosen.clean_title)}\n📅 *Year:* ${infoData.year || 'N/A'}\n📌 *Quality:* ${selectedDl.quality || 'HD'}\n📦 *Size:* ${realSizeMB.toFixed(1)} MB\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭`
+                                caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗠𝗢𝗩𝗜𝗘𝗦𝗨𝗕𝗟𝗞*\n\n🎬 *Title:* ${cleanMsubzTitle(infoData.title || chosen.clean_title)}\n📅 *Year:* ${infoData.year || 'N/A'}\n📌 *Quality:* ${selectedDl.quality || 'HD'}\n📦 *Size:* ${realSizeMB.toFixed(1)} MB\n> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`
                             }, { quoted: dlMek });
 
                             await socket.sendMessage(sender, { react: { text: '✅', key: dlMek.key } });
@@ -12759,7 +13046,7 @@ case 'mslk': {
                         console.error('[MovieSubLK] download error:', downloadErr.message);
 
                         await socket.sendMessage(sender, {
-                            text: `⚠️ *Direct Download*\n\n🎬 *${cleanMsubzTitle(infoData.title || chosen.clean_title)}*\n📌 *${selectedDl.quality}*\n📦 *${selectedDl.size || 'N/A'}*\n\n🔗 *Download Link:*\n${dlUrl}\n\n💡 _IDM එකෙන් download කරන්න._\n\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭`
+                            text: `⚠️ *Direct Download*\n\n🎬 *${cleanMsubzTitle(infoData.title || chosen.clean_title)}*\n📌 *${selectedDl.quality}*\n📦 *${selectedDl.size || 'N/A'}*\n\n🔗 *Download Link:*\n${dlUrl}\n\n💡 _IDM එකෙන් download කරන්න._\n\n> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`
                         }, { quoted: dlMek });
 
                         try { await fs.remove(localFile); } catch {}
@@ -13004,18 +13291,18 @@ case 'rp': {
 
  case 'movieall':
 case 'm': {
-    const DEFAULT_FOOTER = `\n\n> 🎭 🅢🅗🅐🅖🅖🅨 🅧🅜🅓 🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ ʟYɴᴋᴏ`;
+    const DEFAULT_FOOTER = SHAGGY_FOOTER;
 
     if (!args.length) {
         await socket.sendMessage(sender, {
-            text: `*❪ ERROR ❫*\n\n⚠️ *Invalid Usage!*\n\n🎬 *Example:*\n• .movie avatar\n• .m game of thrones\n\n📝 _Please provide the Movie_ _or TV Series name!_${DEFAULT_FOOTER}`
+            text: `╭━━━〔 *ERROR* 〕━━━╮\n\n⚠️ *Invalid Usage!*\n\n🎬 *Example:*\n• .movie avatar\n• .m game of thrones\n\n📝 _Please provide the Movie_ _or TV Series name!_${DEFAULT_FOOTER}`
         }, { quoted: msg });
         break;
     }
 
     const query = args.join(' ');
     await socket.sendMessage(sender, { 
-        text: `*❪ SEARCHING ❫*\n\n🔍 *Searching across all sources...*\n⚡ _Please wait a moment._`
+        text: `╭━━━〔 *SEARCHING* 〕━━━╮\n\n🔍 *Searching across all sources...*\n⚡ _Please wait a moment._`
     });
 
     const API_BASE = CH_BASE;
@@ -13035,12 +13322,12 @@ case 'm': {
 
         if (results.length === 0) {
             await socket.sendMessage(sender, {
-                text: `*❪ NO RESULTS ❫*\n\n😞 *No Results Found!*\n\n🎬 *Query:* _${query}_\n💡 *Tip:* _Please check the spelling and try again!_${DEFAULT_FOOTER}`
+                text: `╭━━━〔 *NO RESULTS* 〕━━━╮\n\n😞 *No Results Found!*\n\n🎬 *Query:* _${query}_\n💡 *Tip:* _Please check the spelling and try again!_${DEFAULT_FOOTER}`
             }, { quoted: msg });
             break;
         }
 
-        let listText = `*❪ MULTI-SOURCE SEARCH RESULTS ❫*\n\n🎯 *Query:* _${query}_\n📊 *Results:* _        ext ${results.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
+        let listText = `╭━━━〔 *MULTI-SOURCE SEARCH RESULTS* 〕━━━╮\n\n🎯 *Query:* _${query}_\n📊 *Results:* _        ext ${results.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
 
         results.forEach((item, index) => {
             const siteTag = item.site.toUpperCase();
@@ -13065,7 +13352,7 @@ case 'm': {
                 const choice = parseInt(messageType) - 1;
                 if (isNaN(choice) || choice < 0 || choice >= results.length) {
                     await socket.sendMessage(sender, {
-                        text: `*❪ INVALID ❫*\n\n⚠️ *Wrong Number!*\n🎯 *Range:* _01 -         ext ${results.length}_\n📝 _Please reply with a valid number!_${DEFAULT_FOOTER}`
+                        text: `╭━━━〔 *INVALID* 〕━━━╮\n\n⚠️ *Wrong Number!*\n🎯 *Range:* _01 -         ext ${results.length}_\n📝 _Please reply with a valid number!_${DEFAULT_FOOTER}`
                     }, { quoted: replyMek });
                     return;
                 }
@@ -13076,7 +13363,7 @@ case 'm': {
 
                 if (isTvShow) {
                     await socket.sendMessage(sender, { 
-                        text: `*❪ FETCHING ❫*\n\n📺 *Fetching TV Series details from ${site.toUpperCase()}...*\n⚡ _Please wait..._`
+                        text: `╭━━━〔 *FETCHING* 〕━━━╮\n\n📺 *Fetching TV Series details from ${site.toUpperCase()}...*\n⚡ _Please wait..._`
                     }, { quoted: replyMek });
 
                     try {
@@ -13089,7 +13376,7 @@ case 'm': {
 
                         const tvInfo = tvShowData.data;
 
-                        let tvDetailsText = `*❪ TV SERIES DETAILS ❫*\n\n📺 *${tvInfo.title}*\n⭐ 𝗜ᴍᴅ𝗯 ➜ ★ ${tvInfo.rating || 'N/A'}\n📅 𝗬ᴇᴀʀ ➜ ${tvInfo.year || 'N/A'}\n⏳ 𝗥ᴜɴᴛɪᴍᴇ ➜ ${tvInfo.duration || 'N/A'}\n🌍 🇨🇴🇺🇳🇹🇷🇾 ➜ ${tvInfo.country || 'N/A'}\n🎭 𝗚𝗲𝗻𝗴𝗿𝗲𝘀 ➜ ${tvInfo.genres ? tvInfo.genres.join(', ') : 'N/A'}\n?? 𝗦𝘁𝗼𝗿𝘆 ➜ ${tvInfo.story ? (tvInfo.story.length > 250 ? tvInfo.story.substring(0, 250) + '...' : tvInfo.story) : 'N/A'}\n🗿 𝗦𝗼𝘂𝗿𝗰𝗲 ➜ ${site.toUpperCase()}\n ${DEFAULT_FOOTER}`;
+                        let tvDetailsText = `╭━━━〔 *TV SERIES DETAILS* 〕━━━╮\n\n📺 *${tvInfo.title}*\n⭐ 𝗜ᴍᴅ𝗯 ➜ ★ ${tvInfo.rating || 'N/A'}\n📅 𝗬ᴇᴀʀ ➜ ${tvInfo.year || 'N/A'}\n⏳ 𝗥ᴜɴᴛɪᴍᴇ ➜ ${tvInfo.duration || 'N/A'}\n🌍 🇨🇴🇺🇳🇹🇷🇾 ➜ ${tvInfo.country || 'N/A'}\n🎭 𝗚𝗲𝗻𝗴𝗿𝗲𝘀 ➜ ${tvInfo.genres ? tvInfo.genres.join(', ') : 'N/A'}\n?? 𝗦𝘁𝗼𝗿𝘆 ➜ ${tvInfo.story ? (tvInfo.story.length > 250 ? tvInfo.story.substring(0, 250) + '...' : tvInfo.story) : 'N/A'}\n🗿 𝗦𝗼𝘂𝗿𝗰𝗲 ➜ ${site.toUpperCase()}\n ${DEFAULT_FOOTER}`;
 
                         const posterUrl = tvInfo.image || selectedItem.image || DEFAULT_IMAGE;
                         await socket.sendMessage(sender, {
@@ -13099,7 +13386,7 @@ case 'm': {
 
                         // AUTO DOWNLOAD ALL EPISODES
                         await socket.sendMessage(sender, { 
-                            text: `*❪ DOWNLOAD EPISODES ❫*\n\n📺 *Series:* _${tvInfo.title}_
+                            text: `╭━━━〔 *DOWNLOAD EPISODES* 〕━━━╮\n\n📺 *Series:* _${tvInfo.title}_
 🎬 *Episodes:* _${tvInfo.episodes.length}_
 ⚡ _Starting download process..._${DEFAULT_FOOTER}`
                         }, { quoted: replyMek });
@@ -13111,7 +13398,7 @@ case 'm': {
                             const episode = tvInfo.episodes[i];
                             try {
                                 await socket.sendMessage(sender, { 
-                                    text: `*❪ DOWNLOADING ❫*\n\n🎥 *Episode:* _${episode.episode_name || episode.name || 'Episode ' + (i + 1)}_
+                                    text: `╭━━━〔 *DOWNLOADING* 〕━━━╮\n\n🎥 *Episode:* _${episode.episode_name || episode.name || 'Episode ' + (i + 1)}_
 📊 *Progress:* _${i + 1}/${tvInfo.episodes.length}_`
                                 }, { quoted: replyMek });
 
@@ -13153,7 +13440,7 @@ case 'm': {
                         }
 
                         await socket.sendMessage(sender, { 
-                            text: `*❪ SUMMARY ❫*\n\n🎉 *Download Complete!*\n\n🎬 *Series:* _${tvInfo.title}_\n✅ *Success:* _${successCount} Episodes_\n❌ *Failed:* _${failCount} Episodes_${DEFAULT_FOOTER}`
+                            text: `╭━━━〔 *SUMMARY* 〕━━━╮\n\n🎉 *Download Complete!*\n\n🎬 *Series:* _${tvInfo.title}_\n✅ *Success:* _${successCount} Episodes_\n❌ *Failed:* _${failCount} Episodes_${DEFAULT_FOOTER}`
                         }, { quoted: replyMek });
 
                         socket.ev.off('messages.upsert', handleSelection);
@@ -13161,7 +13448,7 @@ case 'm': {
                     } catch (tvShowError) {
                         console.error('TV Show error:', tvShowError);
                         await socket.sendMessage(sender, {
-                            text: `*❪ ERROR ❫*\n\n❌ *TV Details Error!*\n🚫 _        ext ${tvShowError.message}_${DEFAULT_FOOTER}`
+                            text: `╭━━━〔 *ERROR* 〕━━━╮\n\n❌ *TV Details Error!*\n🚫 _        ext ${tvShowError.message}_${DEFAULT_FOOTER}`
                         }, { quoted: replyMek });
                         socket.ev.off('messages.upsert', handleSelection);
                     }
@@ -13169,7 +13456,7 @@ case 'm': {
                 } else {
                     // MOVIE FLOW
                     await socket.sendMessage(sender, { 
-                        text: `*❪ FETCHING ❫*\n\n🎬 *Fetching Movie details from ${site.toUpperCase()}...*\n⚡ _Please wait..._`
+                        text: `╭━━━〔 *FETCHING* 〕━━━╮\n\n🎬 *Fetching Movie details from ${site.toUpperCase()}...*\n⚡ _Please wait..._`
                     }, { quoted: replyMek });
 
                     try {
@@ -13185,12 +13472,12 @@ case 'm': {
 
                         if (validDownloads.length === 0) {
                             await socket.sendMessage(sender, {
-                                text: `*❪ NO DOWNLOADS ❫*\n\n⚠️ *No Downloads Found!*\n😞 _There are no downloads available for this movie!_${DEFAULT_FOOTER}`
+                                text: `╭━━━〔 *NO DOWNLOADS* 〕━━━╮\n\n⚠️ *No Downloads Found!*\n😞 _There are no downloads available for this movie!_${DEFAULT_FOOTER}`
                             }, { quoted: replyMek });
                             return;
                         }
 
-                        const movieDetailsText = `*❪ MOVIE DETAILS ❫*\n\n🎬 *${movieInfo.title}*\n⭐ 𝗜𝗠𝗗𝗕 ➜ ★ ${movieInfo.imdb || movieInfo.rating || 'N/A'}\n📅 𝗬𝗲𝗮𝗿 ➜         ext ${movieInfo.year || 'N/A'}\n⏳ 𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻 ➜ ${movieInfo.duration || 'N/A'}\n🌍 🇨🇴🇺🇳🇹🇷🇾 ➜ ${movieInfo.country || 'N/A'}\n🎭 🇬𝗲𝗻𝗿𝗲𝘀 ➜ ${movieInfo.genres ? movieInfo.genres.join(', ') : 'N/A'}\n🏷️ 𝗟𝗮𝗻𝗴 ➜ ${movieInfo.language || movieInfo.tag || 'N/A'}\n🎬 𝗗𝗶𝗿𝗲𝗰𝘁𝗼𝗿 ➜ ${movieInfo.directors || movieInfo.director || 'N/A'}\n⭐ 𝗖𝗮𝘀𝘁 ➜ ${movieInfo.stars || 'N/A'}\n📝 𝗦𝘁𝗼𝗿𝘆 ➜ ${movieInfo.story ? (movieInfo.story.length > 250 ? movieInfo.story.substring(0, 250) + '...' : movieInfo.story) : 'N/A'}\n🗿 𝗦𝗼𝘂𝗿𝗰𝗲 ➜ ${site.toUpperCase()}\n ${DEFAULT_FOOTER}`;
+                        const movieDetailsText = `╭━━━〔 *MOVIE DETAILS* 〕━━━╮\n\n🎬 *${movieInfo.title}*\n⭐ 𝗜𝗠𝗗𝗕 ➜ ★ ${movieInfo.imdb || movieInfo.rating || 'N/A'}\n📅 𝗬𝗲𝗮𝗿 ➜         ext ${movieInfo.year || 'N/A'}\n⏳ 𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻 ➜ ${movieInfo.duration || 'N/A'}\n🌍 🇨🇴🇺🇳🇹🇷🇾 ➜ ${movieInfo.country || 'N/A'}\n🎭 🇬𝗲𝗻𝗿𝗲𝘀 ➜ ${movieInfo.genres ? movieInfo.genres.join(', ') : 'N/A'}\n🏷️ 𝗟𝗮𝗻𝗴 ➜ ${movieInfo.language || movieInfo.tag || 'N/A'}\n🎬 𝗗𝗶𝗿𝗲𝗰𝘁𝗼𝗿 ➜ ${movieInfo.directors || movieInfo.director || 'N/A'}\n⭐ 𝗖𝗮𝘀𝘁 ➜ ${movieInfo.stars || 'N/A'}\n📝 𝗦𝘁𝗼𝗿𝘆 ➜ ${movieInfo.story ? (movieInfo.story.length > 250 ? movieInfo.story.substring(0, 250) + '...' : movieInfo.story) : 'N/A'}\n🗿 𝗦𝗼𝘂𝗿𝗰𝗲 ➜ ${site.toUpperCase()}\n ${DEFAULT_FOOTER}`;
 
                         const moviePosterUrl = movieInfo.image || selectedItem.image || DEFAULT_IMAGE;
                         await socket.sendMessage(sender, {
@@ -13198,7 +13485,7 @@ case 'm': {
                             caption: movieDetailsText
                         }, { quoted: replyMek });
 
-                        const downloadOptionsText = `*❪ DOWNLOADS ❫*\n\n📥 *Select Quality:*\n\n${validDownloads.map((dl, i) => {
+                        const downloadOptionsText = `╭━━━〔 *DOWNLOADS* 〕━━━╮\n\n📥 *Select Quality:*\n\n${validDownloads.map((dl, i) => {
     const num = (i + 1) < 10 ? `0${i + 1}` : `${i + 1}`;
     const qualityIcon = (dl.quality || '').includes('1080') ? '🔥' : (dl.quality || '').includes('720') ? '💎' : '📱';
     return `*${num}* ➜ ${qualityIcon} _${dl.quality}_ 💾 _${dl.size || 'N/A'}_`;
@@ -13218,7 +13505,7 @@ case 'm': {
                                 const dlChoice = parseInt(dlChoiceText) - 1;
                                 if (isNaN(dlChoice) || dlChoice < 0 || dlChoice >= validDownloads.length) {
                                     await socket.sendMessage(sender, {
-                                        text: `*❪ INVALID ❫*\n\n⚠️ *Wrong Number!*\n🎯 *Range:* _01 - ${validDownloads.length}_\n📝 _Please reply with a valid number!_${DEFAULT_FOOTER}`
+                                        text: `╭━━━〔 *INVALID* 〕━━━╮\n\n⚠️ *Wrong Number!*\n🎯 *Range:* _01 - ${validDownloads.length}_\n📝 _Please reply with a valid number!_${DEFAULT_FOOTER}`
                                     }, { quoted: dlReplyMek });
                                     return;
                                 }
@@ -13226,7 +13513,7 @@ case 'm': {
                                 const selectedDownload = validDownloads[dlChoice];
 
                                 await socket.sendMessage(sender, { 
-                                    text: `*❪ SENDING MOVIE ❫*\n\n📥 *Sending:* _${movieInfo.title}_
+                                    text: `╭━━━〔 *SENDING MOVIE* 〕━━━╮\n\n📥 *Sending:* _${movieInfo.title}_
 📊 *Quality:* _${selectedDownload.quality}_
 💾 *Size:* _${selectedDownload.size || 'N/A'}_
 ⚡ _Uploading file to WhatsApp..._`
@@ -13248,7 +13535,7 @@ case 'm': {
                                     }, { quoted: dlReplyMek });
                                 } catch (uploadErr) {
                                     await socket.sendMessage(sender, {
-                                        text: `*❪ UPLOAD FAILED ❫*\n\n❌ *Failed to upload file directly!*\n🔗 *Direct Link:* ${selectedDownload.link}${DEFAULT_FOOTER}`
+                                        text: `╭━━━〔 *UPLOAD FAILED* 〕━━━╮\n\n❌ *Failed to upload file directly!*\n🔗 *Direct Link:* ${selectedDownload.link}${DEFAULT_FOOTER}`
                                     }, { quoted: dlReplyMek });
                                 }
 
@@ -13262,7 +13549,7 @@ case 'm': {
                     } catch (movieDetailsError) {
                         console.error('Movie Details error:', movieDetailsError);
                         await socket.sendMessage(sender, {
-                            text: `*❪ ERROR ❫*\n\n❌ *Movie Details Error!*\n🚫 _${movieDetailsError.message}_${DEFAULT_FOOTER}`
+                            text: `╭━━━〔 *ERROR* 〕━━━╮\n\n❌ *Movie Details Error!*\n🚫 _${movieDetailsError.message}_${DEFAULT_FOOTER}`
                         }, { quoted: replyMek });
                         socket.ev.off('messages.upsert', handleSelection);
                     }
@@ -13275,7 +13562,7 @@ case 'm': {
     } catch (error) {
         console.error('Unified Movie search error:', error);
         await socket.sendMessage(sender, {
-            text: `*❪ SYSTEM ERROR ❫*\n\n❌ *System Error!*\n🚫 _${error.message || 'Unknown error'}_\n\n🔄 _Please try again later..._${DEFAULT_FOOTER}`
+            text: `╭━━━〔 *SYSTEM ERROR* 〕━━━╮\n\n❌ *System Error!*\n🚫 _${error.message || 'Unknown error'}_\n\n🔄 _Please try again later..._${DEFAULT_FOOTER}`
         }, { quoted: msg });
     }
 
@@ -13573,7 +13860,7 @@ case 'liteapks':
 case 'apk':
 case 'mod': {
     const chatJid = msg.key.remoteJid;
-    const DEFAULT_FOOTER = `\n\n> 📱 𝗦𝗛𝗔??𝗚𝗬 𝗫𝗠𝗗 📱\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 👑 𝗦𝗛𝗔𝗚𝗚𝗬 𝗧𝗘𝗖𝗛`;
+    const DEFAULT_FOOTER = SHAGGY_FOOTER;
 
     const API_BASE = CH_BASE;
     const API_KEY = CH_KEY;
@@ -13588,14 +13875,14 @@ case 'mod': {
     // ═══ VALIDATION ═══
     if (!args.length) {
         return await socket.sendMessage(chatJid, {
-            text: `*❪ LITEAPKS ❫*\n\n⚠️ *Usage:*\n• \`.apk spotify\`\n• \`.apk whatsapp\`\n• \`.apk instagram\`\n\n📌 _Premium APKs download කරන්න._${DEFAULT_FOOTER}`
+            text: `╭━━━〔 *LITEAPKS* 〕━━━╮\n\n⚠️ *Usage:*\n• \`.apk spotify\`\n• \`.apk whatsapp\`\n• \`.apk instagram\`\n\n📌 _Premium APKs download කරන්න._${DEFAULT_FOOTER}`
         }, { quoted: msg });
     }
 
     const apkQuery = args.join(' ');
 
     await socket.sendMessage(chatJid, {
-        text: `*❪ SEARCHING ❫*\n\n🔍 *LiteAPKs හි සොයමින්...*\n⚡ _Please wait._`
+        text: `╭━━━〔 *SEARCHING* 〕━━━╮\n\n🔍 *LiteAPKs හි සොයමින්...*\n⚡ _Please wait._`
     }, { quoted: msg });
 
     try {
@@ -13610,7 +13897,7 @@ case 'mod': {
 
         if (!searchData.status || results.length === 0) {
             return await socket.sendMessage(chatJid, {
-                text: `*❪ NO RESULTS ❫*\n\n😞 *"${apkQuery}"* හමු නොවීය!${DEFAULT_FOOTER}`
+                text: `╭━━━〔 *NO RESULTS* 〕━━━╮\n\n😞 *"${apkQuery}"* හමු නොවීය!${DEFAULT_FOOTER}`
             }, { quoted: msg });
         }
 
@@ -14249,33 +14536,462 @@ case 'news':
         break;
     }
 
+    // ==========================================
+    // 🎮 FITGIRL REPACKS - SHAGGY XMD (Full - Split & Send)
+    // ==========================================
     case 'fitgirl':
     case 'fg': {
-        const q = args.join(' ').trim();
-        try {
-            if (!q) return await socket.sendMessage(from, { text: '❌ කරුණාකර සෙවිය යුතු ක්‍රීඩාවේ නමක් සඳහන් කරන්න!\nඋදා: `.fitgirl far cry`' }, { quoted: msg });
+    const FOOTER = SHAGGY_FOOTER;
+    const SASA_API = 'https://sasa-dev-api.xyz';
+    const SASA_KEY = 'Sasa_Dev_Api_a2b4b132e5a12615bcde330c5a2f070e28c03fce';
 
-            const searchUrl = `https://api-siteh-22e22e4cb068.herokuapp.com/fitgirl/search?game=${encodeURIComponent(q)}`;
-            const response = await axios.get(searchUrl);
-            const resData = response.data;
+    // ⚙️ CONFIG
+    const PART_SIZE_MB = 500;
+    const PART_SIZE_BYTES = PART_SIZE_MB * 1024 * 1024;
+    const SEND_DELAY_MS = 3 * 60 * 1000;      // 3 minutes between parts
+    const TEMP_DIR = './tmp_fitgirl';
+    const MAX_PARTS = 300;                     // safety cap
 
-            if (resData.status && resData.results && resData.results.length > 0) {
-                let txt = "🎮 *FitGirl Repacks Search Results* 🎮\n\n";
-                resData.results.forEach((game, index) => {
-                    txt += "*" + (index + 1) + ".* " + game.title + "\n🔗 " + game.link + "\n\n";
-                });
-                txt += "*සම්පූර්ණ විස්තර බැලීමට .fginfo [game name] භාවිතා කරන්න.*";
-
-                await socket.sendMessage(from, { text: txt }, { quoted: msg });
-            } else {
-                await socket.sendMessage(from, { text: '❌ ප්‍රතිඵල හමු නොවීය.' }, { quoted: msg });
-            }
-        } catch (e) {
-            console.error(e);
-            await socket.sendMessage(from, { text: '❌ දෝෂයක් සිදු විය: ' + e.message }, { quoted: msg });
-        }
-        break;
+    if (!args.length) {
+        return await socket.sendMessage(sender, {
+            image: { url: pickBotImage(sessionConfig) },
+            caption: `╭━━━〔 🎮 *FITGIRL REPACKS* 〕━━━╮\n┃\n┃ 📌 *Usage :* .fitgirl <game name>\n┃\n┃ 💡 *Examples :*\n┃   .fitgirl far cry\n┃   .fitgirl gta v\n┃   .fitgirl assassin creed\n┃\n┃ 🎯 _Search FitGirl Repacks site_\n┃ 🔪 _500MB parts walata kadala yawanawa_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+        }, { quoted: msg });
     }
+
+    const fgQuery = args.join(' ').trim();
+
+    let fgSelectionListener = null;
+    let fgDownloadListener = null;
+    let fgMasterTimeout = null;
+
+    const clearAllFgListeners = () => {
+        if (fgSelectionListener) { socket.ev.off('messages.upsert', fgSelectionListener); fgSelectionListener = null; }
+        if (fgDownloadListener)  { socket.ev.off('messages.upsert', fgDownloadListener);  fgDownloadListener  = null; }
+        if (fgMasterTimeout)     { clearTimeout(fgMasterTimeout); fgMasterTimeout = null; }
+    };
+
+    // 🎨 Helpers
+    const fmtSize = (bytes) => {
+        if (!bytes) return 'N/A';
+        const mb = bytes / 1024 / 1024;
+        if (mb < 1024) return `${mb.toFixed(1)} MB`;
+        return `${(mb / 1024).toFixed(2)} GB`;
+    };
+
+    // File download (using global robustDownload for resume + parallel)
+    const downloadToServer = async (url, dest) => {
+        await robustDownload(url, dest, '');
+        return fs.stat(dest);
+    };
+
+    try {
+        // ═══ SEARCH LOADING ═══
+        await socket.sendMessage(sender, {
+            text: `╭━━━〔 ⏳ *SEARCHING* 〕━━━╮\n┃\n┃ 🔍 *Searching FitGirl for:*\n┃  _${fgQuery}_\n┃\n┃  _Please wait..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+        }, { quoted: msg });
+
+        // ═══ STEP 1 : SEARCH ═══
+        const searchRes = await axios.get(`${SASA_API}/api/fitgirl/search`, {
+            params: { apikey: SASA_KEY, q: fgQuery, page: 1 },
+            timeout: 60000
+        });
+
+        const searchData = searchRes.data;
+        const results = searchData.results || searchData.data || (Array.isArray(searchData) ? searchData : []);
+
+        if (!results.length) {
+            return await socket.sendMessage(sender, {
+                image: { url: pickBotImage(sessionConfig) },
+                caption: `╭━━━〔 ❌ *NO RESULTS* 〕━━━╮\n┃\n┃ 🔍 *Query :* ${fgQuery}\n┃ 😔 _කිසිදු game එකක් හමු නොවීය_\n┃\n┃ 💡 _Spelling check කරන්න_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+            }, { quoted: msg });
+        }
+
+        const list = results.slice(0, 15);
+        let listText = `╭━━━〔 🎮 *FITGIRL SEARCH* 〕━━━╮\n`;
+        listText += `┃\n`;
+        listText += `┃ 🔍 *Query :* ${fgQuery}\n`;
+        listText += `┃ 📊 *Found :* ${list.length} result(s)\n`;
+        listText += `┃\n`;
+        listText += `╰━━━━━━━━━━━━━━━━━━╯\n\n`;
+        listText += `*📌 Reply with the number 👇*\n\n`;
+
+        list.forEach((item, index) => {
+            const num = (index + 1) < 10 ? `0${index + 1}` : `${index + 1}`;
+            const title = (item.title || item.name || 'Unknown').substring(0, 45);
+            const size = item.size || item.file_size || '';
+            const repackSize = item.repack_size || '';
+            listText += `*${num}* ┃ 🎮 *${title}*\n`;
+            if (size || repackSize) {
+                listText += `      ┗━ 📦 ${repackSize ? `Repack: ${repackSize}` : size}${size && repackSize ? `  |  Original: ${size}` : ''}\n`;
+            }
+            listText += `\n`;
+        });
+
+        listText += `┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄${FOOTER}`;
+
+        const searchMsg = await socket.sendMessage(sender, {
+            image: { url: list[0].cover || list[0].image || pickBotImage(sessionConfig) },
+            caption: listText
+        }, { quoted: msg });
+
+        const searchMsgID = searchMsg.key.id;
+        fgMasterTimeout = setTimeout(clearAllFgListeners, 180000);
+
+        // ═══ STEP 2 : USER PICKS GAME ═══
+        const handleSelection = async ({ messages: replyMessages }) => {
+            const replyMek = replyMessages[0];
+            if (!replyMek?.message) return;
+
+            const messageType = replyMek.message.conversation || replyMek.message.extendedTextMessage?.text;
+            const isReplyToSentMsg = replyMek.message.extendedTextMessage?.contextInfo?.stanzaId === searchMsgID;
+
+            if (isReplyToSentMsg && sender === replyMek.key.remoteJid) {
+                const choice = parseInt(messageType) - 1;
+                if (isNaN(choice) || choice < 0 || choice >= list.length) {
+                    return socket.sendMessage(sender, {
+                        text: `╭━━━〔 ❌ *INVALID* 〕━━━╮\n┃\n┃  වැරදි අංකයක්!\n┃  🎯 Use 1 - ${list.length}\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                    }, { quoted: replyMek });
+                }
+
+                if (fgSelectionListener) { socket.ev.off('messages.upsert', fgSelectionListener); fgSelectionListener = null; }
+
+                const chosenGame = list[choice];
+                const gameTitle = chosenGame.title || chosenGame.name || fgQuery;
+                const postUrl = chosenGame.url || chosenGame.link;
+
+                if (!postUrl) {
+                    return socket.sendMessage(sender, {
+                        text: `╭━━━〔 ❌ *ERROR* 〕━━━╮\n┃\n┃  Game URL eka hamu unae na\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                    }, { quoted: replyMek });
+                }
+
+                await socket.sendMessage(sender, {
+                    text: `╭━━━〔 ⏳ *LOADING* 〕━━━╮\n┃\n┃ 🎮 *${gameTitle.substring(0, 30)}*\n┃\n┃  🔗 _Resolving download links..._\n┃  _Multiup mirrors auto-resolve wenawa_\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                }, { quoted: replyMek });
+
+                try {
+                    // ═══ STEP 3 : FETCH DOWNLOAD LINKS ═══
+                    const dlRes = await axios.get(`${SASA_API}/api/fitgirl/dl`, {
+                        params: { apikey: SASA_KEY, url: postUrl },
+                        timeout: 120000
+                    });
+
+                    const dlData = dlRes.data;
+                    const downloads = dlData.downloads || dlData.links || dlData.data || (Array.isArray(dlData) ? dlData : []);
+
+                    // Game details
+                    let detailsText = `╭━━━〔 🎮 *${gameTitle.substring(0, 25)}* 〕━━━╮\n┃\n`;
+                    if (chosenGame.genre) detailsText += `┃ 🎭 *Genre    :* ${chosenGame.genre}\n`;
+                    if (chosenGame.developer) detailsText += `┃ 🏢 *Developer:* ${chosenGame.developer}\n`;
+                    if (chosenGame.publisher) detailsText += `┃ 📢 *Publisher:* ${chosenGame.publisher}\n`;
+                    if (chosenGame.repack_size) detailsText += `┃ 📦 *Repack   :* ${chosenGame.repack_size}\n`;
+                    if (chosenGame.original_size) detailsText += `┃ 💾 *Original :* ${chosenGame.original_size}\n`;
+                    detailsText += `┃ 🔗 *Links    :* ${downloads.length}\n`;
+                    detailsText += `┃\n╰━━━━━━━━━━━━━━━━━━╯`;
+
+                    await socket.sendMessage(sender, {
+                        image: { url: chosenGame.cover || chosenGame.image || pickBotImage(sessionConfig) },
+                        caption: detailsText
+                    }, { quoted: replyMek });
+
+                    if (downloads.length === 0) {
+                        return socket.sendMessage(sender, {
+                            text: `╭━━━〔 ❌ *NO LINKS* 〕━━━╮\n┃\n┃ 🎮 *${gameTitle.substring(0, 25)}*\n┃\n┃ 😔 _Download links හමු නොවීය_\n┃\n┃ 💡 *Site eken check කරන්න:*\n┃ ${postUrl}\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+                        }, { quoted: replyMek });
+                    }
+
+                    // ═══ STEP 4 : DOWNLOAD LINKS LIST ═══
+                    let dlText = `╭━━━〔 📥 *DOWNLOAD LINKS* 〕━━━╮\n`;
+                    dlText += `┃\n`;
+                    dlText += `┃ 🎮 *${gameTitle.substring(0, 25)}*\n`;
+                    dlText += `┃ 📊 *${downloads.length} links* available\n`;
+                    dlText += `┃\n`;
+                    dlText += `╰━━━━━━━━━━━━━━━━━━╯\n\n`;
+
+                    downloads.slice(0, 20).forEach((dl, i) => {
+                        const num = (i + 1) < 10 ? `0${i + 1}` : `${i + 1}`;
+                        const host = dl.host || dl.hoster || dl.server || dl.name || 'Unknown';
+                        const size = dl.size || 'N/A';
+                        const part = dl.part || dl.file_name || '';
+
+                        let icon = '🔗';
+                        const hostLower = host.toLowerCase();
+                        if (hostLower.includes('1fichier')) icon = '📁';
+                        else if (hostLower.includes('rapidgator')) icon = '⚡';
+                        else if (hostLower.includes('multiup')) icon = '🚀';
+                        else if (hostLower.includes('mega')) icon = '☁️';
+                        else if (hostLower.includes('mediafire')) icon = '🔥';
+                        else if (hostLower.includes('gdrive') || hostLower.includes('drive')) icon = '📂';
+
+                        dlText += `*${num}* ┃ ${icon} *${host.substring(0, 20)}*\n`;
+                        dlText += `      ┗━ 📦 ${size}${part ? `  |  ${part.substring(0, 20)}` : ''}\n\n`;
+                    });
+
+                    if (downloads.length > 20) {
+                        dlText += `_...තවත් ${downloads.length - 20} links ඇත_\n\n`;
+                    }
+
+                    dlText += `┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n`;
+                    dlText += `*📌 Reply with number to download*\n`;
+                    dlText += `*📌 Reply *all* to get all links*\n`;
+                    dlText += `*🔪 500MB parts walata kadala yawanawa*`;
+                    dlText += FOOTER;
+
+                    const dlMsg = await socket.sendMessage(sender, { text: dlText }, { quoted: replyMek });
+                    const dlMsgID = dlMsg.key.id;
+
+                    // ═══ STEP 5 : USER PICKS DOWNLOAD ═══
+                    const handleDownload = async ({ messages: dlMessages }) => {
+                        const dlMek = dlMessages[0];
+                        if (!dlMek?.message || dlMek.key.remoteJid !== sender) return;
+
+                        const dlChoiceText = (dlMek.message.conversation || dlMek.message.extendedTextMessage?.text || '').trim().toLowerCase();
+                        if (dlMek.message.extendedTextMessage?.contextInfo?.stanzaId !== dlMsgID) return;
+
+                        // 📋 ALL links
+                        if (dlChoiceText === 'all' || dlChoiceText === 'all links') {
+                            clearAllFgListeners();
+                            let allText = `╭━━━〔 📥 *ALL DOWNLOAD LINKS* 〕━━━╮\n┃\n┃ 🎮 *${gameTitle.substring(0, 25)}*\n┃ 📊 *${downloads.length} links*\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n`;
+                            downloads.forEach((dl, i) => {
+                                const host = dl.host || dl.hoster || dl.server || dl.name || 'Unknown';
+                                const size = dl.size || 'N/A';
+                                const url = dl.url || dl.link || dl.download_url;
+                                allText += `*${i + 1}.* ${host} (${size})\n${url}\n\n`;
+                            });
+                            allText += FOOTER;
+                            return socket.sendMessage(sender, { text: allText }, { quoted: dlMek });
+                        }
+
+                        const dlIdx = parseInt(dlChoiceText) - 1;
+                        if (isNaN(dlIdx) || dlIdx < 0 || dlIdx >= downloads.length) {
+                            return socket.sendMessage(sender, {
+                                text: `╭━━━〔 ❌ *INVALID* 〕━━━╮\n┃\n┃  වැරදි අංකයක්!\n┃  🎯 Use 1 - ${downloads.length} or "all"\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                            }, { quoted: dlMek });
+                        }
+
+                        clearAllFgListeners();
+                        const selectedDl = downloads[dlIdx];
+                        const host = selectedDl.host || selectedDl.hoster || selectedDl.server || selectedDl.name || 'Unknown';
+                        const size = selectedDl.size || 'N/A';
+                        const rawUrl = selectedDl.url || selectedDl.link || selectedDl.download_url;
+
+                        await socket.sendMessage(sender, { react: { text: '📥', key: dlMek.key } });
+
+                        // ═══ STEP A : RESOLVE DIRECT LINK ═══
+                        await socket.sendMessage(sender, {
+                            text: `╭━━━〔 ⏳ *RESOLVING* 〕━━━╮\n┃\n┃ 🎮 *${gameTitle.substring(0, 25)}*\n┃ 🏢 *Host :* ${host}\n┃ 📦 *Size :* ${size}\n┃\n┃  🔗 _Direct link resolve karanawa..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                        }, { quoted: dlMek });
+
+                        let directUrl = null;
+                        try {
+                            const rawRes = await axios.get(`${SASA_API}/api/fitgirl/dl`, {
+                                params: { apikey: SASA_KEY, url: rawUrl, raw: 1 },
+                                timeout: 60000,
+                                maxRedirects: 0,
+                                validateStatus: (s) => s >= 200 && s < 400,
+                                headers: { 'User-Agent': DL_UA }
+                            });
+
+                            if (rawRes.status >= 300 && rawRes.status < 400 && rawRes.headers.location) {
+                                directUrl = rawRes.headers.location;
+                            } else if (typeof rawRes.data === 'string' && rawRes.data.startsWith('http')) {
+                                directUrl = rawRes.data.trim();
+                            } else if (rawRes.data?.direct_url) {
+                                directUrl = rawRes.data.direct_url;
+                            } else if (rawRes.data?.url && rawRes.data.url !== rawUrl) {
+                                directUrl = rawRes.data.url;
+                            }
+                        } catch (rawErr) {
+                            if (rawErr.response?.headers?.location) {
+                                directUrl = rawErr.response.headers.location;
+                            } else {
+                                console.log('[FitGirl] raw=1 failed:', rawErr.message);
+                            }
+                        }
+
+                        // No direct URL → fallback link only
+                        if (!directUrl || !/^https?:\/\//i.test(directUrl)) {
+                            return socket.sendMessage(sender, {
+                                text: `╭━━━〔 🔗 *DOWNLOAD LINK* 〕━━━╮\n┃\n┃ 🎮 *${gameTitle.substring(0, 25)}*\n┃ 🏢 *Host :* ${host}\n┃ 📦 *Size :* ${size}\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n*🔗 Link :*\n${rawUrl}\n\n💡 _Me host eken bot ekata direct download karanna ba_\n💡 _IDM / JDownloader use karanna_${FOOTER}`
+                            }, { quoted: dlMek });
+                        }
+
+                        // ═══ STEP B : DOWNLOAD TO SERVER ═══
+                        await fs.ensureDir(TEMP_DIR);
+                        const safeName = gameTitle.replace(/[^a-zA-Z0-9 ]/g, '_').substring(0, 45);
+                        const rawFile = path.join(TEMP_DIR, `${safeName}_${Date.now()}.bin`);
+
+                        await socket.sendMessage(sender, {
+                            text: `╭━━━〔 📥 *DOWNLOADING* 〕━━━╮\n┃\n┃ 🎮 *${gameTitle.substring(0, 25)}*\n┃ 📦 *Size :* ${size}\n┃\n┃  _Server ekata download karanawa..._\n┃  _Me game eka loku wenna puluwan_\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                        }, { quoted: dlMek });
+
+                        try {
+                            await downloadToServer(directUrl, rawFile);
+                            const stats = await fs.stat(rawFile);
+                            const totalSizeMB = stats.size / 1024 / 1024;
+
+                            if (totalSizeMB < 1) {
+                                await fs.remove(rawFile).catch(() => {});
+                                throw new Error('Download failed — file too small');
+                            }
+
+                            const totalParts = Math.ceil(stats.size / PART_SIZE_BYTES);
+
+                            await socket.sendMessage(sender, {
+                                text: `╭━━━〔 ✅ *DOWNLOADED* 〕━━━╮\n┃\n┃ 📦 *Size  :* ${totalSizeMB.toFixed(1)} MB\n┃ 🔪 *Parts :* ${totalParts}\n┃\n┃  _Splitting into ${PART_SIZE_MB}MB parts..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                            }, { quoted: dlMek });
+
+                            // ═══ STEP C : SPLIT INTO PARTS ═══
+                            const splitDir = path.join(TEMP_DIR, `${safeName}_parts_${Date.now()}`);
+                            await fs.ensureDir(splitDir);
+
+                            const parts = [];
+                            const readStream = fs.createReadStream(rawFile, { highWaterMark: 4 * 1024 * 1024 });
+
+                            let currentPart = 0;
+                            let currentSize = 0;
+                            let writeStream = null;
+                            let totalWritten = 0;
+
+                            const openPart = () => {
+                                const partPath = path.join(splitDir, `${safeName}.part${String(currentPart + 1).padStart(3, '0')}.bin`);
+                                writeStream = fs.createWriteStream(partPath);
+                                parts.push({ index: currentPart + 1, path: partPath, size: 0 });
+                            };
+                            openPart();
+
+                            for await (const chunk of readStream) {
+                                let offset = 0;
+                                while (offset < chunk.length) {
+                                    const spaceLeft = PART_SIZE_BYTES - currentSize;
+                                    const toWrite = Math.min(spaceLeft, chunk.length - offset);
+                                    const slice = chunk.subarray(offset, offset + toWrite);
+
+                                    if (!writeStream.write(slice)) {
+                                        await new Promise((r) => writeStream.once('drain', r));
+                                    }
+                                    currentSize += toWrite;
+                                    totalWritten += toWrite;
+                                    parts[parts.length - 1].size += toWrite;
+                                    offset += toWrite;
+
+                                    if (currentSize >= PART_SIZE_BYTES && totalWritten < stats.size) {
+                                        await new Promise((r) => writeStream.end(r));
+                                        currentPart++;
+                                        currentSize = 0;
+                                        if (currentPart < totalParts && currentPart < MAX_PARTS) openPart();
+                                    }
+                                }
+                            }
+                            if (writeStream && !writeStream.writableEnded) {
+                                await new Promise((r) => writeStream.end(r));
+                            }
+                            await fs.remove(rawFile).catch(() => {});
+
+                            // ═══ STEP D : SEND PARTS WITH DELAY ═══
+                            await socket.sendMessage(sender, {
+                                text: `╭━━━〔 📤 *SENDING PARTS* 〕━━━╮\n┃\n┃ 🎮 *${gameTitle.substring(0, 25)}*\n┃ 📦 *Total Parts :* ${parts.length}\n┃ 💾 *Part Size   :* ~${PART_SIZE_MB} MB\n┃ ⏱️ *Delay       :* 3 min\n┃\n┃  _Starting now... Please wait_\n┃  _Me process eka hours ganak ganna puluwan_\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                            }, { quoted: dlMek });
+
+                            let sentCount = 0;
+                            let failedCount = 0;
+
+                            for (let i = 0; i < parts.length; i++) {
+                                const part = parts[i];
+                                const partLabel = `Part ${i + 1}/${parts.length}`;
+                                const partSizeMB = (part.size / 1024 / 1024).toFixed(1);
+
+                                try {
+                                    await socket.sendMessage(sender, {
+                                        document: { url: part.path },
+                                        mimetype: 'application/octet-stream',
+                                        fileName: `${safeName}.part${String(i + 1).padStart(3, '0')}`,
+                                        caption: `╭━━━〔 🎮 *${gameTitle.substring(0, 20)}* 〕━━━╮\n┃\n┃ 📌 *${partLabel}*\n┃ 📦 *Size :* ${partSizeMB} MB\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n${SHAGGY_FOOTER_SHORT}`
+                                    }, { quoted: dlMek });
+
+                                    sentCount++;
+                                    await fs.remove(part.path).catch(() => {});
+
+                                    // Wait between parts (except last)
+                                    if (i < parts.length - 1) {
+                                        await socket.sendMessage(sender, {
+                                            text: `✅ *${partLabel}* sent!\n⏱️ _Waiting 3 minutes for next part..._`
+                                        });
+                                        await new Promise((r) => setTimeout(r, SEND_DELAY_MS));
+                                    }
+                                } catch (sendErr) {
+                                    console.error(`[FitGirl] ${partLabel} send failed:`, sendErr.message);
+                                    failedCount++;
+                                    await socket.sendMessage(sender, {
+                                        text: `❌ *${partLabel}* send failed!\n_${sendErr.message.substring(0, 60)}_`
+                                    });
+                                }
+                            }
+
+                            // ═══ STEP E : COMPLETE ═══
+                            await socket.sendMessage(sender, {
+                                text: `╭━━━〔 ✅ *COMPLETE* 〕━━━╮\n┃\n┃ 🎮 *${gameTitle.substring(0, 25)}*\n┃ 📤 *Sent   :* ${sentCount} parts\n┃ ❌ *Failed :* ${failedCount} parts\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n💡 *Extract කරන විදිය :*\n1. Parts ඔක්කොම එක folder එකකට දාන්න\n2. Part 1 එක WinRAR / 7-Zip එකෙන් open කරන්න\n3. Extract කරන්න — ඔක්කොම auto merge වෙනවා\n\n⚠️ _හැම part එකම එකම folder එකේ තියෙන්න ඕනේ_${FOOTER}`
+                            }, { quoted: dlMek });
+
+                            // Cleanup split dir
+                            await fs.remove(splitDir).catch(() => {});
+
+                        } catch (downloadErr) {
+                            console.error('[FitGirl] download error:', downloadErr.message);
+                            await socket.sendMessage(sender, {
+                                text: `╭━━━〔 ❌ *DOWNLOAD FAILED* 〕━━━╮\n┃\n┃  _${downloadErr.message.substring(0, 100)}_\n┃\n┃ 🔗 *Direct link try කරන්න :*\n┃ ${directUrl || rawUrl}\n┃\n┃ 💡 _IDM / JDownloader use කරන්න_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+                            }, { quoted: dlMek });
+                            try { await fs.remove(rawFile); } catch {}
+                        }
+                    };
+
+                    fgDownloadListener = handleDownload;
+                    socket.ev.on('messages.upsert', fgDownloadListener);
+                    if (fgMasterTimeout) clearTimeout(fgMasterTimeout);
+                    fgMasterTimeout = setTimeout(clearAllFgListeners, 6 * 3600 * 1000); // 6 hours (huge games)
+
+                } catch (dlErr) {
+                    clearAllFgListeners();
+                    console.error('[FitGirl] DL error:', dlErr.message);
+                    await socket.sendMessage(sender, {
+                        text: `╭━━━〔 ❌ *ERROR* 〕━━━╮\n┃\n┃  _${dlErr.message.substring(0, 100)}_\n┃\n┃ 🔗 *Site :* ${postUrl}\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+                    }, { quoted: replyMek });
+                }
+            }
+        };
+
+        fgSelectionListener = handleSelection;
+        socket.ev.on('messages.upsert', fgSelectionListener);
+
+    } catch (err) {
+        clearAllFgListeners();
+        console.error('[FitGirl] Search error:', err.message);
+        await socket.sendMessage(sender, {
+            text: `╭━━━〔 ❌ *SEARCH ERROR* 〕━━━╮\n┃\n┃  _${err.message.substring(0, 100)}_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+        }, { quoted: msg });
+    }
+    break;
+    }
+
+// ==========================================
+// 📁 USERSDRIVE DOWNLOADER - SHAGGY XMD
+// ==========================================
+case 'usersdrive':
+case 'udrive':
+case 'ud': {
+    const udLink = extractUsersDriveLink(args.join(' '));
+
+    if (!udLink) {
+        return await socket.sendMessage(sender, {
+            image: { url: pickBotImage(sessionConfig) },
+            caption: `╭━━━〔 📁 *USERSDRIVE DL* 〕━━━╮\n┃\n┃ 📌 *Usage :* .usersdrive <link>\n┃\n┃ 💡 *Example :*\n┃   .ud https://usersdrive.com/xxxxx.html\n┃\n┃ 🎯 _UsersDrive file download karanawa_\n┃ 🔪 _500MB parts walata kadala yawanawa_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${SHAGGY_FOOTER}`
+        }, { quoted: msg });
+    }
+
+    await shaggyUdDownload(socket, sender, msg, udLink);
+    break;
+}
 
     case 'fginfo':
     case 'fitgirlinfo': {
@@ -14753,7 +15469,7 @@ case 'callvoice': {
 // ==========================================
 case 'moviebox':
 case 'mbox': {
-    const DEFAULT_FOOTER = `\n\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 👑 𝗦𝗛𝗔𝗚𝗚𝗬 𝗧𝗘𝗖𝗛`;
+    const DEFAULT_FOOTER = SHAGGY_FOOTER;
     const TEMP_DIR = './tmp_moviebox';
 
     if (!args.length) {
@@ -14798,7 +15514,7 @@ case 'mbox': {
 
     try {
         await socket.sendMessage(sender, {
-            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚 ❫*\n\n🔍 *Searching MovieBox for:* _${movieQuery}_\n⚡ _Please wait..._`
+            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚* 〕━━━╮\n\n🔍 *Searching MovieBox for:* _${movieQuery}_\n⚡ _Please wait..._`
         }, { quoted: msg });
 
         // ═══ STEP 1 : SEARCH ═══
@@ -14823,7 +15539,7 @@ case 'mbox': {
         }
 
         const list = results.slice(0, 20);
-        let listText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗠𝗢𝗩𝗜𝗘𝗕𝗢𝗫 ❫*\n\n🎯 *Query:* _${movieQuery}_\n📊 *Results:* _${list.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
+        let listText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗠𝗢𝗩𝗜𝗘𝗕𝗢𝗫* 〕━━━╮\n\n🎯 *Query:* _${movieQuery}_\n📊 *Results:* _${list.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
 
         list.forEach((item, index) => {
             const num = (index + 1) < 10 ? `0${index + 1}` : `${index + 1}`;
@@ -14866,7 +15582,7 @@ case 'mbox': {
                 const selectedItem = list[choice];
 
                 await socket.sendMessage(sender, {
-                    text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚 ❫*\n\n🎬 *Fetching Movie details from MovieBox...*\n⚡ _Please wait..._`
+                    text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚* 〕━━━╮\n\n🎬 *Fetching Movie details from MovieBox...*\n⚡ _Please wait..._`
                 }, { quoted: replyMek });
 
                 try {
@@ -14879,7 +15595,7 @@ case 'mbox': {
                     const validDownloads = (movieInfo.downloads || []).filter(d => d.link);
 
                     // Details
-                    let detailsText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗠𝗢𝗩𝗜𝗘𝗕𝗢𝗫 ❫*\n\n`;
+                    let detailsText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗠𝗢𝗩𝗜𝗘𝗕𝗢𝗫* 〕━━━╮\n\n`;
                     detailsText += `🎬 *${movieInfo.title || selectedItem.title}*\n`;
                     detailsText += `⭐ *IMDb:* ${movieInfo.imdb || 'N/A'}\n`;
                     detailsText += `📅 *Year:* ${movieInfo.year || 'N/A'}\n`;
@@ -14903,7 +15619,7 @@ case 'mbox': {
                     }
 
                     // ═══ STEP 4 : DOWNLOAD OPTIONS ═══
-                    let dlText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗦 ❫*\n\n📥 *Select Quality:*\n\n`;
+                    let dlText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗦* 〕━━━╮\n\n📥 *Select Quality:*\n\n`;
                     validDownloads.forEach((dl, i) => {
                         const num = (i + 1) < 10 ? `0${i + 1}` : `${i + 1}`;
                         const sizeMB = parseSizeMB(dl.size);
@@ -14970,7 +15686,7 @@ case 'mbox': {
                                     document: { url: localFile },
                                     mimetype: 'video/mp4',
                                     fileName: `${safeName} - ${selectedDownload.quality || 'HD'}.mp4`,
-                                    caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗠𝗢𝗩𝗜𝗘𝗕𝗢𝗫*\n\n🎬 *Title:* ${movieInfo.title || selectedItem.title}\n📅 *Year:* ${movieInfo.year || 'N/A'}\n⭐ *IMDb:* ${movieInfo.imdb || 'N/A'}\n📌 *Quality:* ${selectedDownload.quality || 'HD'}\n📦 *Size:* ${selectedDownload.size || 'N/A'}\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭`
+                                    caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗠𝗢𝗩𝗜𝗘𝗕𝗢𝗫*\n\n🎬 *Title:* ${movieInfo.title || selectedItem.title}\n📅 *Year:* ${movieInfo.year || 'N/A'}\n⭐ *IMDb:* ${movieInfo.imdb || 'N/A'}\n📌 *Quality:* ${selectedDownload.quality || 'HD'}\n📦 *Size:* ${selectedDownload.size || 'N/A'}\n> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`
                                 }, { quoted: dlReplyMek });
 
                                 await socket.sendMessage(sender, { react: { text: '✅', key: dlReplyMek.key } });
@@ -15010,7 +15726,7 @@ case 'mbox': {
     } catch (err) {
         clearAllMbListeners();
         await socket.sendMessage(sender, {
-            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗘𝗥𝗥𝗢𝗥 ❫*\n\n❌ *Search Error:* ${err.message}${DEFAULT_FOOTER}`
+            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗘𝗥𝗥𝗢𝗥* 〕━━━╮\n\n❌ *Search Error:* ${err.message}${DEFAULT_FOOTER}`
         }, { quoted: msg });
     }
     break;
@@ -15083,7 +15799,7 @@ case 'gen': {
 // ==========================================
 case 'cineru':
 case 'cru': {
-    const DEFAULT_FOOTER = `\n\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 👑 𝗦𝗛𝗔𝗚𝗚𝗬 𝗧𝗘𝗖𝗛`;
+    const DEFAULT_FOOTER = SHAGGY_FOOTER;
     const TEMP_DIR = './tmp_cineru';
 
     if (!args.length) {
@@ -15133,7 +15849,7 @@ case 'cru': {
 
     try {
         await socket.sendMessage(sender, {
-            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚 ❫*\n\n🔍 *Searching Cineru for:* _${cineruQuery}_\n⚡ _Please wait..._`
+            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗦𝗘𝗔𝗥𝗖𝗛𝗜𝗡𝗚* 〕━━━╮\n\n🔍 *Searching Cineru for:* _${cineruQuery}_\n⚡ _Please wait..._`
         }, { quoted: msg });
 
         // ═══ STEP 1 : SEARCH ═══
@@ -15158,7 +15874,7 @@ case 'cru': {
         }
 
         const list = results.slice(0, 20);
-        let listText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗖𝗜𝗡𝗘𝗥𝗨 ❫*\n\n🎯 *Query:* _${cineruQuery}_\n📊 *Results:* _${list.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
+        let listText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗖𝗜𝗡𝗘𝗥𝗨* 〕━━━╮\n\n🎯 *Query:* _${cineruQuery}_\n📊 *Results:* _${list.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
 
         list.forEach((item, index) => {
             const num = (index + 1) < 10 ? `0${index + 1}` : `${index + 1}`;
@@ -15203,7 +15919,7 @@ case 'cru': {
                 const isTvShow = selectedItem.type === 'tvshows';
 
                 await socket.sendMessage(sender, {
-                    text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚 ❫*\n\n🎬 *Fetching details from Cineru...*\n⚡ _Please wait..._`
+                    text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚* 〕━━━╮\n\n🎬 *Fetching details from Cineru...*\n⚡ _Please wait..._`
                 }, { quoted: replyMek });
 
                 try {
@@ -15217,7 +15933,7 @@ case 'cru': {
                     const cleanTitle = cleanCineruTitle(movieInfo.title || selectedItem.title);
 
                     // Details
-                    let detailsText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗖𝗜𝗡𝗘𝗥𝗨 ❫*\n\n`;
+                    let detailsText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗖𝗜𝗡𝗘𝗥𝗨* 〕━━━╮\n\n`;
                     detailsText += `🎬 *${cleanTitle}*\n`;
                     detailsText += `⭐ *IMDb:* ${movieInfo.imdb || 'N/A'}\n`;
                     detailsText += `📅 *Year:* ${movieInfo.year || 'N/A'}\n`;
@@ -15246,7 +15962,7 @@ case 'cru': {
                     }
 
                     // ═══ STEP 4 : DOWNLOAD OPTIONS ═══
-                    let dlText = `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗦 ❫*\n\n📥 *Available Files:*\n\n`;
+                    let dlText = `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗦* 〕━━━╮\n\n📥 *Available Files:*\n\n`;
                     validDownloads.forEach((dl, i) => {
                         const num = (i + 1) < 10 ? `0${i + 1}` : `${i + 1}`;
                         const dlName = dl.name || dl.title || dl.quality || `File ${i + 1}`;
@@ -15331,7 +16047,7 @@ case 'cru': {
                                     document: { url: localFile },
                                     mimetype: mimetype,
                                     fileName: finalFileName,
-                                    caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗖𝗜𝗡𝗘𝗥𝗨*\n\n🎬 *Title:* ${cleanTitle}\n📅 *Year:* ${movieInfo.year || 'N/A'}\n📁 *File:* ${dlName}\n📦 *Size:* ${realSizeMB.toFixed(2)} MB\n> 🎭 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 🎭`
+                                    caption: `✅ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 • 𝗖𝗜𝗡𝗘𝗥𝗨*\n\n🎬 *Title:* ${cleanTitle}\n📅 *Year:* ${movieInfo.year || 'N/A'}\n📁 *File:* ${dlName}\n📦 *Size:* ${realSizeMB.toFixed(2)} MB\n> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`
                                 }, { quoted: dlReplyMek });
 
                                 await socket.sendMessage(sender, { react: { text: '✅', key: dlReplyMek.key } });
@@ -15371,7 +16087,7 @@ case 'cru': {
     } catch (err) {
         clearAllCrListeners();
         await socket.sendMessage(sender, {
-            text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗘𝗥𝗥𝗢𝗥 ❫*\n\n❌ *Search Error:* ${err.message}${DEFAULT_FOOTER}`
+            text: `╭━━━〔 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗘𝗥𝗥𝗢𝗥* 〕━━━╮\n\n❌ *Search Error:* ${err.message}${DEFAULT_FOOTER}`
         }, { quoted: msg });
     }
     break;
@@ -15383,7 +16099,7 @@ case 'cru': {
 case 'mflix':
 case 'mfl':
 case 'kdrama': {
-    const FOOTER = `\n\n┗━━━━━━━━━━━━━━━━━━┛\n> 🎬 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 🎬`;
+    const FOOTER = SHAGGY_FOOTER;
     const TEMP_DIR = './tmp_mflix';
 
     // 🎨 Common UI styles
@@ -15726,7 +16442,7 @@ case 'kdrama': {
                                         document: { url: localFile },
                                         mimetype: 'video/mp4',
                                         fileName: fileName,
-                                        caption: `╭━━━〔 ✅ *MFLIX DOWNLOAD* 〕━━━╮\n┃\n┃ 🎬 *${cleanTitle.substring(0, 22)}*\n┃ 📺 *Episode:* ${selectedEpNum || 'Movie'}\n┃ ${srv.icon} *Server:* ${srv.name}\n┃ 🎞 *Quality:* ${quality}\n┃ 📦 *Size:* ${realSizeMB.toFixed(1)} MB\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n> 🎬 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 🎬`
+                                        caption: `╭━━━〔 ✅ *MFLIX DOWNLOAD* 〕━━━╮\n┃\n┃ 🎬 *${cleanTitle.substring(0, 22)}*\n┃ 📺 *Episode:* ${selectedEpNum || 'Movie'}\n┃ ${srv.icon} *Server:* ${srv.name}\n┃ 🎞 *Quality:* ${quality}\n┃ 📦 *Size:* ${realSizeMB.toFixed(1)} MB\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦`
                                     }, { quoted: srvMek });
 
                                     await socket.sendMessage(sender, { react: { text: '✅', key: srvMek.key } });
