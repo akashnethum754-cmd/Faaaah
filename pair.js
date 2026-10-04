@@ -5237,7 +5237,453 @@ case 'chsearch': {
     }
     break;
 }
+// ==========================================
+// 🎬 K-DRAMA - ZANTA API (Search + Download)
+// ==========================================
+case 'kdrama':
+case 'kd': {
+    const FOOTER = `\n\n┗━━━━━━━━━━━━━━━━━━┛\n> 🎬 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 🎬`;
+    const ZANTA_API = 'https://api.zanta-mini.store';
+    const ZANTA_KEY = 'zanta_1SbhE9DSZzfwWe1Z6h4KII1i';
 
+    if (!args.length) {
+        return await socket.sendMessage(sender, {
+            image: { url: pickBotImage(sessionConfig) },
+            caption: `╭━━━〔 🎬 *K-DRAMA SEARCH* 〕━━━╮\n┃\n┃ 📌 *Usage :* .kdrama <name>\n┃\n┃ 💡 *Examples :*\n┃   .kdrama Dream\n┃   .kdrama New\n┃   .kd new\n┃\n┃ 🔍 _Search DramaKey.com_\n┃ ⬇️ _Direct download links_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+        }, { quoted: msg });
+    }
+
+    const kdQuery = args.join(' ').trim();
+
+    let kdSelectionListener = null;
+    let kdDownloadListener = null;
+    let kdEpisodeListener = null;
+    let kdMasterTimeout = null;
+
+    const clearAllKdListeners = () => {
+        if (kdSelectionListener) { socket.ev.off('messages.upsert', kdSelectionListener); kdSelectionListener = null; }
+        if (kdDownloadListener)  { socket.ev.off('messages.upsert', kdDownloadListener);  kdDownloadListener  = null; }
+        if (kdEpisodeListener)   { socket.ev.off('messages.upsert', kdEpisodeListener);   kdEpisodeListener   = null; }
+        if (kdMasterTimeout)     { clearTimeout(kdMasterTimeout); kdMasterTimeout = null; }
+    };
+
+    const cleanKdTitle = (t = '') =>
+        t.replace(/\s*\|\s*(Chinese|Korean|Thai|Japanese)\s*Drama.*$/i, '')
+         .replace(/\s*\((Complete|Ongoing|Episode.*)\)\s*\|.*$/i, '')
+         .replace(/\s*\|.*$/i, '')
+         .trim();
+
+    try {
+        // ═══ SEARCH LOADING ═══
+        await socket.sendMessage(sender, {
+            text: `╭━━━〔 ⏳ *SEARCHING* 〕━━━╮\n┃\n┃ 🔍 *Searching DramaKey:*\n┃  _${kdQuery}_\n┃\n┃  _Please wait..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+        }, { quoted: msg });
+
+        // ═══ STEP 1 : SEARCH ═══
+        const searchRes = await axios.get(`${ZANTA_API}/api/kdrama/search`, {
+            params: { apiKey: ZANTA_KEY, text: kdQuery },
+            timeout: 60000
+        });
+
+        const searchData = searchRes.data;
+        const results = searchData.results || [];
+
+        if (!searchData.success || results.length === 0) {
+            return await socket.sendMessage(sender, {
+                image: { url: pickBotImage(sessionConfig) },
+                caption: `╭━━━〔 ❌ *NO RESULTS* 〕━━━╮\n┃\n┃ 🔍 *Query :* ${kdQuery}\n┃ 😔 _කිසිදු drama එකක් හමු නොවීය_\n┃\n┃ 💡 _Spelling check කරන්න_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+            }, { quoted: msg });
+        }
+
+        const list = results.slice(0, 15);
+        let listText = `╭━━━〔 🎬 *K-DRAMA SEARCH* 〕━━━╮\n┃\n`;
+        listText += `┃ 🔍 *Query :* ${kdQuery}\n`;
+        listText += `┃ 📊 *Found :* ${list.length} result(s)\n`;
+        listText += `┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n`;
+        listText += `*📌 Reply with the number 👇*\n\n`;
+
+        list.forEach((item, index) => {
+            const num = (index + 1) < 10 ? `0${index + 1}` : `${index + 1}`;
+            const title = cleanKdTitle(item.title).substring(0, 40);
+            const type = item.title.match(/\((Chinese|Korean|Thai|Japanese)\s*Drama\)/i)?.[1] || 'Drama';
+            const status = item.title.match(/\((Complete|Ongoing|Episode.*?)\)/i)?.[1] || 'N/A';
+            listText += `*${num}* ┃ 🎬 *${title}*\n`;
+            listText += `      ┗━ 🌏 ${type}  |  📺 ${status.substring(0, 20)}\n\n`;
+        });
+
+        listText += `┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄${FOOTER}`;
+
+        const searchMsg = await socket.sendMessage(sender, {
+            image: { url: list[0].thumbnail || pickBotImage(sessionConfig) },
+            caption: listText
+        }, { quoted: msg });
+
+        const searchMsgID = searchMsg.key.id;
+        kdMasterTimeout = setTimeout(clearAllKdListeners, 180000);
+
+        // ═══ STEP 2 : USER PICKS DRAMA ═══
+        const handleSelection = async ({ messages: replyMessages }) => {
+            const replyMek = replyMessages[0];
+            if (!replyMek?.message) return;
+
+            const messageType = replyMek.message.conversation || replyMek.message.extendedTextMessage?.text;
+            const isReplyToSentMsg = replyMek.message.extendedTextMessage?.contextInfo?.stanzaId === searchMsgID;
+
+            if (isReplyToSentMsg && sender === replyMek.key.remoteJid) {
+                const choice = parseInt(messageType) - 1;
+                if (isNaN(choice) || choice < 0 || choice >= list.length) {
+                    return socket.sendMessage(sender, {
+                        text: `╭━━━〔 ❌ *INVALID* 〕━━━╮\n┃\n┃  වැරදි අංකයක්!\n┃  🎯 Use 1 - ${list.length}\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                    }, { quoted: replyMek });
+                }
+
+                if (kdSelectionListener) { socket.ev.off('messages.upsert', kdSelectionListener); kdSelectionListener = null; }
+
+                const selectedItem = list[choice];
+                const dramaTitle = cleanKdTitle(selectedItem.title);
+
+                await socket.sendMessage(sender, {
+                    text: `╭━━━〔 ⏳ *LOADING* 〕━━━╮\n┃\n┃ 🎬 *${dramaTitle.substring(0, 30)}*\n┃\n┃  🔗 _Fetching episodes..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                }, { quoted: replyMek });
+
+                try {
+                    // ═══ STEP 3 : FETCH EPISODES ═══
+                    const dlRes = await axios.get(`${ZANTA_API}/api/kdrama/dl`, {
+                        params: { apiKey: ZANTA_KEY, text: selectedItem.url },
+                        timeout: 90000
+                    });
+
+                    const dlData = dlRes.data;
+                    if (!dlData.success || !dlData.results) {
+                        throw new Error('Episodes fetch failed');
+                    }
+
+                    const dramaInfo = dlData.results;
+                    const episodes = dramaInfo.episodes_list || [];
+                    const cleanTitle = cleanKdTitle(dramaInfo.title);
+
+                    if (episodes.length === 0) {
+                        return socket.sendMessage(sender, {
+                            text: `╭━━━〔 ❌ *NO EPISODES* 〕━━━╮\n┃\n┃ 🎬 *${cleanTitle.substring(0, 25)}*\n┃\n┃ 😔 _Episodes හමු නොවීය_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+                        }, { quoted: replyMek });
+                    }
+
+                    // ═══ DETAILS UI ═══
+                    let detailsText = `╭━━━〔 🎬 *DRAMA INFO* 〕━━━╮\n┃\n`;
+                    detailsText += `┃ 🎬 *${cleanTitle.substring(0, 25)}*\n`;
+                    detailsText += `┃ 📺 *Episodes :* ${episodes.length}\n`;
+                    detailsText += `┃\n╰━━━━━━━━━━━━━━━━━━╯`;
+
+                    if (selectedItem.summary) {
+                        const summary = selectedItem.summary.substring(0, 200);
+                        detailsText += `\n\n📖 *Story :*\n_${summary}..._`;
+                    }
+                    detailsText += FOOTER;
+
+                    await socket.sendMessage(sender, {
+                        image: { url: selectedItem.thumbnail || pickBotImage(sessionConfig) },
+                        caption: detailsText
+                    }, { quoted: replyMek });
+
+                    // ═══ EPISODE LIST UI ═══
+                    let epText = `╭━━━〔 📺 *SELECT EPISODE* 〕━━━╮\n┃\n`;
+                    epText += `┃ 🎬 *${cleanTitle.substring(0, 25)}*\n`;
+                    epText += `┃ 📊 *${episodes.length} Episodes*\n`;
+                    epText += `┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n`;
+                    epText += `*📌 Reply with episode number 👇*\n`;
+                    epText += `*📌 Reply *all* to get all links*\n\n`;
+
+                    episodes.forEach((ep, idx) => {
+                        const num = (idx + 1) < 10 ? `0${idx + 1}` : `${idx + 1}`;
+                        epText += `*${num}* ┃ 📺 Episode ${ep.episode}\n`;
+                    });
+
+                    epText += `\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n`;
+                    epText += `_Me drama eke ${episodes.length} episodes thiyenawa_`;
+                    epText += FOOTER;
+
+                    const epMsg = await socket.sendMessage(sender, { text: epText }, { quoted: replyMek });
+                    const epMsgID = epMsg.key.id;
+
+                    // ═══ STEP 4 : USER PICKS EPISODE ═══
+                    const handleEpisode = async ({ messages: epMessages }) => {
+                        const epMek = epMessages[0];
+                        if (!epMek?.message || epMek.key.remoteJid !== sender) return;
+
+                        const epChoiceText = (epMek.message.conversation || epMek.message.extendedTextMessage?.text || '').trim().toLowerCase();
+                        if (epMek.message.extendedTextMessage?.contextInfo?.stanzaId !== epMsgID) return;
+
+                        // 📋 ALL episodes
+                        if (epChoiceText === 'all' || epChoiceText === 'all links') {
+                            clearAllKdListeners();
+                            let allText = `╭━━━〔 📥 *ALL EPISODES* 〕━━━╮\n┃\n┃ 🎬 *${cleanTitle.substring(0, 25)}*\n┃ 📊 *${episodes.length} Episodes*\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n`;
+                            episodes.forEach((ep) => {
+                                allText += `*Ep ${ep.episode}:* ${ep.download_link}\n\n`;
+                            });
+                            allText += FOOTER;
+                            return socket.sendMessage(sender, { text: allText }, { quoted: epMek });
+                        }
+
+                        const epIdx = parseInt(epChoiceText) - 1;
+                        if (isNaN(epIdx) || epIdx < 0 || epIdx >= episodes.length) {
+                            return socket.sendMessage(sender, {
+                                text: `╭━━━〔 ❌ *INVALID* 〕━━━╮\n┃\n┃  වැරදි අංකයක්!\n┃  🎯 Use 1 - ${episodes.length}\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                            }, { quoted: epMek });
+                        }
+
+                        clearAllKdListeners();
+                        const selectedEp = episodes[epIdx];
+                        const epDownloadLink = selectedEp.download_link;
+
+                        await socket.sendMessage(sender, { react: { text: '📥', key: epMek.key } });
+
+                        // ═══ STEP 5 : RESOLVE DOWNLOADWELLA LINK ═══
+                        await socket.sendMessage(sender, {
+                            text: `╭━━━〔 ⏳ *RESOLVING* 〕━━━╮\n┃\n┃ 📺 *Episode ${selectedEp.episode}*\n┃\n┃  🔗 _Direct link resolve karanawa..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                        }, { quoted: epMek });
+
+                        let directUrl = null;
+                        try {
+                            // Downloadwella page එකට request එකක්
+                            const pageRes = await axios.get(epDownloadLink, {
+                                timeout: 30000,
+                                headers: {
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                                    'Accept': 'text/html,application/xhtml+xml'
+                                }
+                            });
+                            const html = typeof pageRes.data === 'string' ? pageRes.data : '';
+
+                            // Direct download link හොයන්න
+                            const patterns = [
+                                /href=["'](https?:\/\/[^"']*downloadwella\.com\/[^"']*\?[^"']*)["']/i,
+                                /id=["']download["'][^>]*href=["'](https?:\/\/[^"']+)["']/i,
+                                /<a[^>]+href=["'](https?:\/\/[^"']*\.(?:mkv|mp4)[^"']*)["']/i,
+                                /(https?:\/\/[^\s"'<>]*\.(?:mkv|mp4)[^\s"'<>]*)/i,
+                                /var\s+download_url\s*=\s*["'](https?:\/\/[^"']+)["']/i
+                            ];
+
+                            for (const pattern of patterns) {
+                                const m = html.match(pattern);
+                                if (m && m[1]) { directUrl = m[1]; break; }
+                            }
+                        } catch (e) {
+                            console.log('[K-Drama] resolve failed:', e.message);
+                        }
+
+                        // Fallback → send link only
+                        if (!directUrl || !/^https?:\/\//i.test(directUrl)) {
+                            return socket.sendMessage(sender, {
+                                text: `╭━━━〔 🔗 *DOWNLOAD LINK* 〕━━━╮\n┃\n┃ 📺 *Episode ${selectedEp.episode}*\n┃ 🎬 *${cleanTitle.substring(0, 25)}*\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n*🔗 Link :*\n${epDownloadLink}\n\n💡 _Browser eken open karanna_\n💡 _IDM use karanna_${FOOTER}`
+                            }, { quoted: epMek });
+                        }
+
+                        // ═══ STEP 6 : DOWNLOAD + SEND ═══
+                        const TEMP_DIR = './tmp_kdrama';
+                        await fs.ensureDir(TEMP_DIR);
+                        const safeName = cleanTitle.replace(/[^a-zA-Z0-9 ]/g, '_').substring(0, 45);
+                        const localFile = path.join(TEMP_DIR, `${safeName}_Ep${selectedEp.episode}_${Date.now()}.mkv`);
+
+                        await socket.sendMessage(sender, {
+                            text: `╭━━━〔 📥 *DOWNLOADING* 〕━━━╮\n┃\n┃ 📺 *Episode ${selectedEp.episode}*\n┃\n┃  _Server ekata download karanawa..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                        }, { quoted: epMek });
+
+                        try {
+                            await robustDownload(directUrl, localFile, epDownloadLink);
+                            const stats = await fs.stat(localFile);
+                            const sizeMB = stats.size / 1024 / 1024;
+
+                            if (sizeMB < 0.5) {
+                                await fs.remove(localFile).catch(() => {});
+                                throw new Error('File too small');
+                            }
+
+                            await socket.sendMessage(sender, {
+                                text: `╭━━━〔 ✅ *DOWNLOADED* 〕━━━╮\n┃\n┃ 📦 *Size :* ${sizeMB.toFixed(1)} MB\n┃\n┃  📤 _Sending to WhatsApp..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                            }, { quoted: epMek });
+
+                            // Small file (≤500MB) → send directly
+                            if (sizeMB <= 500) {
+                                try {
+                                    await socket.sendMessage(sender, {
+                                        document: { url: localFile },
+                                        mimetype: 'video/x-matroska',
+                                        fileName: `${safeName}_Ep${selectedEp.episode}.mkv`,
+                                        caption: `╭━━━〔 🎬 *K-DRAMA* 〕━━━╮\n┃\n┃ 🎬 *${cleanTitle.substring(0, 25)}*\n┃ 📺 *Episode ${selectedEp.episode}*\n┃ 📦 *Size :* ${sizeMB.toFixed(1)} MB\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n> 🎬 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 🎬`
+                                    }, { quoted: epMek });
+
+                                    await socket.sendMessage(sender, { react: { text: '✅', key: epMek.key } });
+                                } catch (sendErr) {
+                                    await socket.sendMessage(sender, {
+                                        text: `❌ Send fail: ${sendErr.message.substring(0, 80)}\n\n🔗 *Direct Link:*\n${directUrl}${FOOTER}`
+                                    }, { quoted: epMek });
+                                }
+
+                                await fs.remove(localFile).catch(() => {});
+                            } else {
+                                // Big file → split into 500MB parts
+                                const PART_SIZE_BYTES = 500 * 1024 * 1024;
+                                const SEND_DELAY_MS = 3 * 60 * 1000;
+                                const totalParts = Math.ceil(stats.size / PART_SIZE_BYTES);
+
+                                await socket.sendMessage(sender, {
+                                    text: `╭━━━〔 ✂️ *SPLITTING* 〕━━━╮\n┃\n┃ 📦 *Size :* ${sizeMB.toFixed(1)} MB\n┃ 🔪 *Parts:* ${totalParts}\n┃\n┃  _Splitting into 500MB parts..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                                }, { quoted: epMek });
+
+                                const splitDir = path.join(TEMP_DIR, `${safeName}_parts_${Date.now()}`);
+                                await fs.ensureDir(splitDir);
+
+                                const parts = [];
+                                const readStream = fs.createReadStream(localFile, { highWaterMark: 4 * 1024 * 1024 });
+                                let currentPart = 0;
+                                let currentSize = 0;
+                                let writeStream = null;
+                                let totalWritten = 0;
+
+                                const openPart = () => {
+                                    const partPath = path.join(splitDir, `${safeName}.Ep${selectedEp.episode}.part${String(currentPart + 1).padStart(3, '0')}.bin`);
+                                    writeStream = fs.createWriteStream(partPath);
+                                    parts.push({ index: currentPart + 1, path: partPath, size: 0 });
+                                };
+                                openPart();
+
+                                for await (const chunk of readStream) {
+                                    let offset = 0;
+                                    while (offset < chunk.length) {
+                                        const spaceLeft = PART_SIZE_BYTES - currentSize;
+                                        const toWrite = Math.min(spaceLeft, chunk.length - offset);
+                                        const slice = chunk.subarray(offset, offset + toWrite);
+
+                                        if (!writeStream.write(slice)) {
+                                            await new Promise((r) => writeStream.once('drain', r));
+                                        }
+                                        currentSize += toWrite;
+                                        totalWritten += toWrite;
+                                        parts[parts.length - 1].size += toWrite;
+                                        offset += toWrite;
+
+                                        if (currentSize >= PART_SIZE_BYTES && totalWritten < stats.size) {
+                                            await new Promise((r) => writeStream.end(r));
+                                            currentPart++;
+                                            currentSize = 0;
+                                            if (currentPart < totalParts) openPart();
+                                        }
+                                    }
+                                }
+                                if (writeStream && !writeStream.writableEnded) {
+                                    await new Promise((r) => writeStream.end(r));
+                                }
+                                await fs.remove(localFile).catch(() => {});
+
+                                // Send parts with delay
+                                let sentCount = 0, failedCount = 0;
+                                for (let i = 0; i < parts.length; i++) {
+                                    const part = parts[i];
+                                    const partLabel = `Part ${i + 1}/${parts.length}`;
+                                    const partSizeMB = (part.size / 1024 / 1024).toFixed(1);
+
+                                    try {
+                                        await socket.sendMessage(sender, {
+                                            document: { url: part.path },
+                                            mimetype: 'application/octet-stream',
+                                            fileName: `${safeName}.Ep${selectedEp.episode}.part${String(i + 1).padStart(3, '0')}`,
+                                            caption: `╭━━━〔 🎬 *${cleanTitle.substring(0, 20)}* 〕━━━╮\n┃ 📺 Episode ${selectedEp.episode}\n┃ 📌 ${partLabel}\n┃ 📦 ${partSizeMB} MB\n╰━━━━━━━━━━━━━━━━━━╯\n\n> 🎬 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 🎬`
+                                        }, { quoted: epMek });
+                                        sentCount++;
+                                        await fs.remove(part.path).catch(() => {});
+
+                                        if (i < parts.length - 1) {
+                                            await new Promise((r) => setTimeout(r, SEND_DELAY_MS));
+                                        }
+                                    } catch (sendErr) {
+                                        failedCount++;
+                                    }
+                                }
+
+                                await socket.sendMessage(sender, {
+                                    text: `╭━━━〔 ✅ *COMPLETE* 〕━━━╮\n┃\n┃ 🎬 *${cleanTitle.substring(0, 25)}*\n┃ 📺 *Episode ${selectedEp.episode}*\n┃ 📤 *Sent   :* ${sentCount}\n┃ ❌ *Failed :* ${failedCount}\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n💡 _Parts ඔක්කොම එක folder එකකට දාලා Part 1 extract කරන්න_${FOOTER}`
+                                }, { quoted: epMek });
+
+                                await fs.remove(splitDir).catch(() => {});
+                            }
+                        } catch (downloadErr) {
+                            console.error('[K-Drama] download error:', downloadErr.message);
+                            await socket.sendMessage(sender, {
+                                text: `╭━━━〔 ❌ *DOWNLOAD FAILED* 〕━━━╮\n┃\n┃  _${downloadErr.message.substring(0, 80)}_\n┃\n┃ 🔗 *Link:*\n┃ ${directUrl || epDownloadLink}\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+                            }, { quoted: epMek });
+                            try { await fs.remove(localFile); } catch {}
+                        }
+                    };
+
+                    kdDownloadListener = handleEpisode;
+                    socket.ev.on('messages.upsert', kdDownloadListener);
+                    if (kdMasterTimeout) clearTimeout(kdMasterTimeout);
+                    kdMasterTimeout = setTimeout(clearAllKdListeners, 30 * 60 * 1000);
+
+                } catch (dlErr) {
+                    clearAllKdListeners();
+                    console.error('[K-Drama] DL error:', dlErr.message);
+                    await socket.sendMessage(sender, {
+                        text: `╭━━━〔 ❌ *ERROR* 〕━━━╮\n┃\n┃  _${dlErr.message.substring(0, 100)}_\n┃\n┃ 🔗 *URL:* ${selectedItem.url}\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+                    }, { quoted: replyMek });
+                }
+            }
+        };
+
+        kdSelectionListener = handleSelection;
+        socket.ev.on('messages.upsert', kdSelectionListener);
+
+    } catch (err) {
+        clearAllKdListeners();
+        console.error('[K-Drama] Search error:', err.message);
+        await socket.sendMessage(sender, {
+            text: `╭━━━〔 ❌ *SEARCH ERROR* 〕━━━╮\n┃\n┃  _${err.message.substring(0, 100)}_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+        }, { quoted: msg });
+    }
+    break;
+}
+
+// ==========================================
+// 📧 TEMP MAIL GENERATOR (.tempmail)
+// ==========================================
+case 'tempmail':
+case 'tempm':
+case 'tm': {
+    const ZANTA_API = 'https://api.zanta-mini.store';
+    const ZANTA_KEY = 'zanta_1SbhE9DSZzfwWe1Z6h4KII1i';
+    const FOOTER = `\n\n┗━━━━━━━━━━━━━━━━━━┛\n> 📧 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 📧`;
+
+    try {
+        await socket.sendMessage(sender, { react: { text: '📧', key: msg.key } });
+        await socket.sendMessage(sender, {
+            text: `╭━━━〔 ⏳ *GENERATING* 〕━━━╮\n┃\n┃ 📧 _Temp email hadanawa..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+        }, { quoted: msg });
+
+        const res = await axios.get(`${ZANTA_API}/api/tempmail/generate`, {
+            params: { apiKey: ZANTA_KEY },
+            timeout: 30000
+        });
+
+        if (!res.data.success || !res.data.email) {
+            throw new Error('Email generate failed');
+        }
+
+        const email = res.data.email;
+
+        await socket.sendMessage(sender, {
+            text: `╭━━━〔 📧 *TEMP MAIL* 〕━━━╮\n┃\n┃ 📩 *Email :*\n┃ \`${email}\`\n┃\n┃ 💡 _Copy karala use karanna_\n┃ ⏱️ _Temp email — 1 hour wage_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+        }, { quoted: msg });
+        await socket.sendMessage(sender, { react: { text: '✅', key: msg.key } });
+
+    } catch (err) {
+        console.error('[tempmail] error:', err.message);
+        await socket.sendMessage(sender, { react: { text: '❌', key: msg.key } }).catch(() => {});
+        await socket.sendMessage(sender, {
+            text: `╭━━━〔 ❌ *ERROR* 〕━━━╮\n┃\n┃  _${err.message.substring(0, 100)}_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+        }, { quoted: msg });
+    }
+    break;
+}
 case 'chfollow':
 case 'chunfollow':
 case 'chreact': {
