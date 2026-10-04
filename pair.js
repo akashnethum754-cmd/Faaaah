@@ -1391,6 +1391,39 @@ function parseEpisodeSelection(txt, total, max = 5) {
     return { list };
 }
 
+// 🖼 Poster image eka remote site eken fetch wenne nathnam (hotlink block / 403) => Referer ekka bot eken download karala yawanawa, ehema baha nam text witharak
+async function fetchImageBuffer(url) {
+    const origin = (() => { try { return new URL(url).origin + '/'; } catch (_) { return ''; } })();
+    const r = await axios.get(url, {
+        responseType: 'arraybuffer', timeout: 20000, maxContentLength: 8 * 1024 * 1024, __retry: 2,
+        headers: { 'User-Agent': DL_UA, Accept: 'image/avif,image/webp,image/*,*/*;q=0.8', ...(origin ? { Referer: origin } : {}) }
+    });
+    const ct = String(r.headers['content-type'] || '');
+    if (!/^image\//i.test(ct) || !r.data?.length) throw new Error('not an image');
+    return Buffer.from(r.data);
+}
+function installImageFallback(socket) {
+    if (socket.__imgFallbackInstalled) return;
+    socket.__imgFallbackInstalled = true;
+    const prev = socket.sendMessage.bind(socket);
+    socket.sendMessage = async (jid, content, options) => {
+        try {
+            return await prev(jid, content, options);
+        } catch (e) {
+            const url = content?.image?.url;
+            if (!url || !/^https?:\/\//i.test(url) || !/Failed to fetch stream|status code|ENOTFOUND|ECONN|ETIMEDOUT|socket hang up|aborted/i.test(String(e?.message))) throw e;
+            console.error('[image] remote fetch failed, retrying via bot:', String(e.message).slice(0, 120));
+            try {
+                return await prev(jid, { ...content, image: await fetchImageBuffer(url) }, options);
+            } catch (_) {
+                const text = content.caption || content.text || '';
+                if (!text) throw e;
+                return await prev(jid, { text }, options);          // poster nathuwa text witharak yawanawa
+            }
+        }
+    };
+}
+
 const MOVIE_COMMANDS = new Set([
     'cinesubz','sinhalasub','cinesend','tvsend','dinka','dinkamovies','dinkamovieslk','moviehubbd','mhbd','bw',
     'movie','mv','cineverse','cv','lakvision','lv','piratelk','plk','tamilmv','tamil','cinemx','cmx','nethmv','vault',
@@ -1925,6 +1958,7 @@ async function setupCommandHandlers(socket, number) {
         prefix: () => sessionConfig.PREFIX || config.PREFIX || '.'
     });
     installFreeLimit(socket, () => resolvePlan(sessionConfig, sanitizedNumber), sanitizedNumber);
+    installImageFallback(socket);
 
     // 🆕 Web panel eken / wenath tenakin DB eke config eka wenas kalath, MongoDB Change Stream eken
     // (polling nathuwa) real-time widihata bot ekatama apply karanawa. Meka DB ekata continuous load
