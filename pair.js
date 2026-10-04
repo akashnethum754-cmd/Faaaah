@@ -12347,6 +12347,154 @@ case 'pupil': {
     }
     break;
 } 
+   // ==========================================
+// 📢 CHANNEL LATEST MESSAGE FETCHER (.config)
+// ==========================================
+case 'config':
+case 'chmsg':
+case 'latest': {
+    const CHANNEL_JID = '0029VbDjCWdD8SE6WeuGqD0p@newsletter';
+    const DEFAULT_FOOTER = `\n\n> 📢 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 📢`;
+
+    if (!args.length) {
+        return await socket.sendMessage(sender, {
+            image: { url: pickBotImage(sessionConfig) },
+            caption: `╭━━━〔 📢 *CHANNEL FETCHER* 〕━━━╮\n┃\n┃ 📌 *Usage :* .config <keyword>\n┃\n┃ 💡 *Example :*\n┃   .config Hutch\n┃   .config V2ray\n┃   .config Cloudnet\n┃\n┃ 🔍 _Channel eke latest message eka hoyanawa_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${DEFAULT_FOOTER}`
+        }, { quoted: msg });
+    }
+
+    const keyword = args.join(' ').trim();
+    const lowerKeyword = keyword.toLowerCase();
+
+    try {
+        await socket.sendMessage(sender, { react: { text: '🔎', key: msg.key } });
+
+        await socket.sendMessage(sender, {
+            text: `╭━━━〔 ⏳ *SEARCHING CHANNEL* 〕━━━╮\n┃\n┃ 🔍 *Keyword :* ${keyword}\n┃ 📢 *Channel :* Cloudnet V2ray\n┃\n┃  _Fetching messages..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+        }, { quoted: msg });
+
+        // ═══ FETCH CHANNEL MESSAGES ═══
+        let foundMessage = null;
+        let foundTimestamp = 0;
+
+        try {
+            // Method 1: newsletterFetchMessages (baileys)
+            if (typeof socket.newsletterFetchMessages === 'function') {
+                const result = await socket.newsletterFetchMessages(CHANNEL_JID, 50);
+                const messages = result?.messages || result || [];
+
+                for (const m of messages) {
+                    const body = m?.message?.conversation
+                        || m?.message?.extendedTextMessage?.text
+                        || m?.message?.imageMessage?.caption
+                        || m?.message?.videoMessage?.caption
+                        || '';
+                    const ts = (m?.messageTimestamp || 0) * 1000;
+
+                    if (body.toLowerCase().includes(lowerKeyword) && ts > foundTimestamp) {
+                        foundMessage = { body, message: m, ts };
+                        foundTimestamp = ts;
+                    }
+                }
+            }
+        } catch (fetchErr) {
+            console.error('[config] newsletterFetchMessages failed:', fetchErr.message);
+        }
+
+        // Method 2: raw IQ query fallback
+        if (!foundMessage) {
+            try {
+                const iqRes = await socket.query({
+                    tag: 'iq',
+                    attrs: {
+                        id: socket.generateMessageTag(),
+                        type: 'get',
+                        xmlns: 'newsletter',
+                        to: 's.whatsapp.net'
+                    },
+                    content: [{
+                        tag: 'messages',
+                        attrs: { type: 'jid', jid: CHANNEL_JID, count: '50' }
+                    }]
+                });
+
+                const node = iqRes?.content?.[0];
+                const msgs = Array.isArray(node?.content)
+                    ? node.content.filter(c => c.tag === 'message')
+                    : [];
+
+                for (const m of msgs) {
+                    const pt = m.content?.find(c => c.tag === 'plaintext');
+                    if (!pt?.content) continue;
+
+                    const buf = typeof pt.content === 'string'
+                        ? Buffer.from(pt.content, 'binary')
+                        : Buffer.from(pt.content);
+
+                    try {
+                        const decoded = BaileysNS.proto.Message.decode(buf);
+                        const body = decoded.conversation
+                            || decoded.extendedTextMessage?.text
+                            || decoded.imageMessage?.caption
+                            || decoded.videoMessage?.caption
+                            || '';
+                        const ts = parseInt(m.attrs?.server_id || '0', 10);
+
+                        if (body.toLowerCase().includes(lowerKeyword) && ts > foundTimestamp) {
+                            foundMessage = { body, message: m, ts };
+                            foundTimestamp = ts;
+                        }
+                    } catch { /* skip decode errors */ }
+                }
+            } catch (iqErr) {
+                console.error('[config] IQ query failed:', iqErr.message);
+            }
+        }
+
+        // ═══ RESULT ═══
+        if (!foundMessage) {
+            return await socket.sendMessage(sender, {
+                text: `╭━━━〔 ❌ *NOT FOUND* 〕━━━╮\n┃\n┃ 🔍 *Keyword :* ${keyword}\n┃\n┃ 😔 _Channel eke me keyword ekata\n┃    adala message ekak hamu unae na_\n┃\n┃ 💡 _Wena keyword ekak try karanna_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${DEFAULT_FOOTER}`
+            }, { quoted: msg });
+        }
+
+        // ═══ EXTRACT LINKS ═══
+        const linkRegex = /(https?:\/\/[^\s]+)/g;
+        const links = foundMessage.body.match(linkRegex) || [];
+
+        // ═══ SEND MESSAGE ═══
+        let outputText = `╭━━━〔 📢 *LATEST MESSAGE* 〕━━━╮\n┃\n`;
+        outputText += `┃ 🔍 *Keyword :* ${keyword}\n`;
+        outputText += `┃ 📢 *Channel :* Cloudnet V2ray\n`;
+        if (foundTimestamp) {
+            const date = new Date(foundTimestamp);
+            const pad = (n) => String(n).padStart(2, '0');
+            outputText += `┃ 📅 *Date    :* ${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}\n`;
+        }
+        outputText += `┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n`;
+
+        outputText += `📝 *Message :*\n${foundMessage.body}\n`;
+
+        if (links.length > 0) {
+            outputText += `\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n`;
+            outputText += `🔗 *Links (${links.length}) :*\n`;
+            links.forEach((l, i) => { outputText += `\n${i + 1}. ${l}`; });
+        }
+
+        outputText += DEFAULT_FOOTER;
+
+        await socket.sendMessage(sender, { text: outputText }, { quoted: msg });
+        await socket.sendMessage(sender, { react: { text: '✅', key: msg.key } });
+
+    } catch (err) {
+        console.error('[config] error:', err.message);
+        await socket.sendMessage(sender, { react: { text: '❌', key: msg.key } }).catch(() => {});
+        await socket.sendMessage(sender, {
+            text: `╭━━━〔 ❌ *ERROR* 〕━━━╮\n┃\n┃  _${err.message.substring(0, 120)}_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${DEFAULT_FOOTER}`
+        }, { quoted: msg });
+    }
+    break;
+}                 
 // ==========================================
 // MOVIESUBLK.COM - SHAGGY XMD (GDrive + Direct)
 // ==========================================
