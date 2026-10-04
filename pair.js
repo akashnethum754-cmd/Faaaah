@@ -1842,7 +1842,7 @@ const SHAGGY_FOOTER_SHORT = '> ✦ *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* ✦';
 const SHAGGY_FOOTER = `\n\n${SHAGGY_LINE}\n${SHAGGY_FOOTER_SHORT}\n> _ᴘᴏᴡᴇʀᴇᴅ ʙʏ ꜱʜᴀɢɢʏ ᴛᴇᴄʜ_`;
 
 const UD_SASA_API = 'https://sasa-dev-api.xyz';
-const UD_SASA_KEY = 'Sasa_Dev_Api_a2b4b132e5a12615bcde330c5a2f070e28c03fce';
+const UD_SASA_KEY = 'Sasa_Dev_Api_df97cd72da03b2069c369e1d959514fe4c1c960d';
 const UD_PART_SIZE_MB = 500;
 const UD_PART_SIZE_BYTES = UD_PART_SIZE_MB * 1024 * 1024;
 const UD_SEND_DELAY_MS = 3 * 60 * 1000;
@@ -3899,150 +3899,209 @@ case 'help': {
         const footer = sessionConfig.BOT_FOOTER || config.BOT_FOOTER;
         const menuImage = { url: sessionConfig.BOT_IMAGE || config.BOT_IMAGE }; // menu image eka wenas karanne na
 
+        // ── Section types inside each category ──
+        // S = Search · I = Info · D = Download · T = Tools · C = Channel · G = Group send · X = Cases · M = Manage
+        const SECTIONS = [
+            ['S', '🔍', 'SEARCH'],
+            ['I', 'ℹ️', 'INFO'],
+            ['D', '📥', 'DOWNLOAD'],
+            ['T', '🧰', 'TOOLS'],
+            ['C', '📢', 'CHANNEL'],
+            ['G', '📤', 'GROUP SEND'],
+            ['X', '🧩', 'CASES'],
+            ['M', '👑', 'MANAGE']
+        ];
+
         // ── Categories (every command listed here has a real case) ──
         const categories = {
             '1': {
                 emoji: '🎬', title: 'MOVIES & TV',
                 cmds: [
-                    ['cinesubz', 'Sinhala sub movies'],
-                    ['sinhalasub', 'Sinhala sub movies'],
-                    ['cineverse', 'CineVerseLK movies & series'],
-                    ['cinetv', 'TV series'],
-                    ['cinesend', 'CineSubz -> send to group (owner)'],
-                    ['tvsend', 'CineTV -> send to group (owner)'],
-                    ['cin', 'Cine movies (alt)'],
-                    ['movie', 'Multi source search'],
-                    ['movieall', 'All-source search'],
-                    ['moviesublk', 'MovieSubLK'],
-                    ['subzlk', 'SubzLK'],
-                    ['moviemania', 'MovieMania'],
-                    ['lakvision', 'LakVision'],
-                    ['piratelk', 'PirateLK'],
-                    ['dinka', 'DinkaMovies'],
-                    ['cinemx', 'CineMX'],
-                    ['pupilmovie', 'PupilVideo'],
-                    ['chithrapata', 'Chithrapata'],
-                    ['dubzone', 'DubZone'],
-                    ['sinhalatop', 'SinhalaTop'],
-                    ['thinkiri', 'TheNkiri'],
-                    ['tamilmv', 'Tamil movies'],
-                    ['nethmv', 'NethMV vault'],
-                    ['mhbd', 'MovieHubBD'],
-                    ['wrestling', 'WatchWrestling']
+                    ['S', 'cinesubz', 'CineSubz · Sinhala sub movies'],
+                    ['S', 'sinhalasub', 'SinhalaSub · Sinhala sub movies'],
+                    ['S', 'cineverse', 'CineVerseLK movies & series'],
+                    ['S', 'cin', 'Cine movies (alt)'],
+                    ['S', 'movie', 'Multi source search'],
+                    ['S', 'movieall', 'All-source search'],
+                    ['S', 'moviesublk', 'MovieSubLK'],
+                    ['S', 'subzlk', 'SubzLK'],
+                    ['S', 'moviemania', 'MovieMania'],
+                    ['S', 'lakvision', 'LakVision'],
+                    ['S', 'piratelk', 'PirateLK (UsersDrive auto-dl)'],
+                    ['S', 'dinka', 'DinkaMovies'],
+                    ['S', 'cinemx', 'CineMX'],
+                    ['S', 'pupilmovie', 'PupilVideo'],
+                    ['S', 'chithrapata', 'Chithrapata'],
+                    ['S', 'dubzone', 'DubZone'],
+                    ['S', 'sinhalatop', 'SinhalaTop'],
+                    ['S', 'thinkiri', 'TheNkiri'],
+                    ['S', 'tamilmv', 'Tamil movies'],
+                    ['S', 'nethmv', 'NethMV vault'],
+                    ['S', 'mhbd', 'MovieHubBD'],
+                    ['S', 'moviebox', 'MovieBox'],
+                    ['S', 'cineru', 'Cineru · movies & TV series']
                 ]
             },
             '2': {
-                emoji: '⬇️', title: 'DOWNLOADERS',
+                emoji: '📺', title: 'SERIES, ANIME & CARTOON',
                 cmds: [
-                    ['song', 'Song / YouTube audio'],
-                    ['csong', 'Song -> channel post (owner)'],
-                    ['vote', 'Channel poll vote (owner)'],
-                    ['chsearch', 'Channel search (owner)'],
-                    ['chfollow', 'Channel follow (owner)'],
-                    ['chunfollow', 'Channel unfollow (owner)'],
-                    ['chreact', 'Channel post react (owner)'],
-                    ['yt', 'YouTube video / audio'],
-                    ['tiktok', 'TikTok (no watermark)'],
-                    ['mediafire', 'MediaFire files  🆕'],
-                    ['gdrive', 'Google Drive files'],
-                    ['apk', 'Mod APK search & dl'],
-                    ['rom', 'Game ROM search & dl'],
-                    ['fitgirl', 'FitGirl repacks'],
-                    ['fginfo', 'FitGirl game info'],
-                    ['usersdrive', 'UsersDrive downloader (.ud)'],
-                    ['config', 'Channel latest message (.config)'],
-                    ['sdl', 'Save status video'],
-                    ['vv', 'View-once saver']
+                    ['S', 'cinetv', 'TV series'],
+                    ['S', 'mflix', 'MFlix · K-Drama & series'],
+                    ['S', 'anime', 'Anime search'],
+                    ['S', 'animexin', 'Donghua / Animexin'],
+                    ['S', 'cartoon', 'Cartoons.lk'],
+                    ['S', 'cartoon2', 'Sinhala cartoons'],
+                    ['S', 'wrestling', 'WatchWrestling']
                 ]
             },
             '3': {
-                emoji: '🎌', title: 'ANIME & CARTOON',
+                emoji: '📥', title: 'DOWNLOADERS',
                 cmds: [
-                    ['anime', 'Anime search'],
-                    ['animexin', 'Donghua / Animexin'],
-                    ['cartoon', 'Cartoons.lk'],
-                    ['cartoon2', 'Sinhala cartoons']
+                    ['D', 'yt', 'YouTube video / audio'],
+                    ['D', 'song', 'Song / YouTube audio'],
+                    ['D', 'tiktok', 'TikTok (no watermark)'],
+                    ['D', 'mediafire', 'MediaFire files'],
+                    ['D', 'gdrive', 'Google Drive files'],
+                    ['D', 'usersdrive', 'UsersDrive files  (.ud)'],
+                    ['D', 'tg', 'Telegram link downloader'],
+                    ['D', 'sdl', 'Save status video'],
+                    ['D', 'vv', 'View-once saver']
                 ]
             },
             '4': {
-                emoji: '🛠️', title: 'TOOLS & FUN',
+                emoji: '🎮', title: 'GAMES & APPS',
                 cmds: [
-                    ['ai', 'AI chat'],
-                    ['sticker', 'Image → sticker'],
-                    ['toimg', 'Sticker → image'],
-                    ['qr', 'QR code generator'],
-                    ['short', 'URL shortener'],
-                    ['weather', 'Weather report'],
-                    ['calc', 'Calculator'],
-                    ['news', 'Sri Lanka news'],
-                    ['papers', 'Past papers'],
-                    ['schedule', 'Schedule a message'],
-                    ['jid', 'Get chat JID']
+                    ['S', 'fitgirl', 'FitGirl repacks · search & dl'],
+                    ['S', 'rom', 'Game ROM search & dl'],
+                    ['S', 'apk', 'Mod APK search & dl'],
+                    ['I', 'fginfo', 'FitGirl game info']
                 ]
             },
             '5': {
-                emoji: '⚙️', title: 'GENERAL & GROUP',
+                emoji: '🧰', title: 'TOOLS, AI & INFO',
                 cmds: [
-                    ['alive', 'Bot status'],
-                    ['menu', 'This menu'],
-                    ['ping', 'Speed & system info'],
-                    ['owner', 'Owner contact'],
-                    ['pair', 'Pair a new number'],
-                    ['getkey', 'Web panel access key'],
-                    ['license', 'Subscription status'],
-                    ['bots', 'Active sessions'],
-                    ['tagall', 'Tag everyone (group)'],
-                    ['groupinfo', 'Group info']
+                    ['S', 'papers', 'Past papers search'],
+                    ['I', 'weather', 'Weather report'],
+                    ['I', 'news', 'Sri Lanka news'],
+                    ['I', 'config', 'Channel latest message'],
+                    ['I', 'groupinfo', 'Group info'],
+                    ['I', 'jid', 'Get chat JID'],
+                    ['T', 'ai', 'AI chat'],
+                    ['T', 'aiimage', 'AI image generator'],
+                    ['T', 'sticker', 'Image → sticker'],
+                    ['T', 'toimg', 'Sticker → image'],
+                    ['T', 'qr', 'QR code generator'],
+                    ['T', 'short', 'URL shortener'],
+                    ['T', 'calc', 'Calculator'],
+                    ['T', 'schedule', 'Schedule a message'],
+                    ['T', 'tagall', 'Tag everyone (group)']
                 ]
             },
             '6': {
-                emoji: '👑', title: 'ADMIN',
+                emoji: '🔞', title: 'ADULT 18+',
+                note: '\n⚠️ _18+ witharai_',
+                cmds: [
+                    ['S', 'rexporn', 'RexPorn · search & dl'],
+                    ['S', 'phub', 'Phub · search & video info']
+                ]
+            },
+            '7': {
+                emoji: '⚙️', title: 'GENERAL',
+                cmds: [
+                    ['I', 'alive', 'Bot status'],
+                    ['I', 'ping', 'Speed & system info'],
+                    ['I', 'owner', 'Owner contact'],
+                    ['I', 'license', 'Subscription status'],
+                    ['I', 'bots', 'Active sessions'],
+                    ['T', 'menu', 'This menu'],
+                    ['T', 'pair', 'Pair a new number'],
+                    ['T', 'getkey', 'Web panel access key']
+                ]
+            },
+            '8': {
+                emoji: '👑', title: 'OWNER & ADMIN',
                 adminOnly: true,
                 note: '\n⚠️ _Admin / owner only_',
                 cmds: [
-                    ['set', 'Settings panel'],
-                    ['adauto', 'Add auto reply'],
-                    ['delauto', 'Delete auto reply'],
-                    ['autorep', 'Auto reply list'],
-                    ['add', 'Add subscription (master)']
+                    ['M', 'set', 'Settings panel'],
+                    ['M', 'button', 'Button mode on/off'],
+                    ['M', 'adauto', 'Add auto reply'],
+                    ['M', 'delauto', 'Delete auto reply'],
+                    ['M', 'autorep', 'Auto reply list'],
+                    ['M', 'add', 'Add subscription (master)'],
+                    ['M', 'stats', 'Bot statistics'],
+                    ['M', 'botlist', 'Connected bot list'],
+                    ['M', 'ban', 'Ban a number'],
+                    ['M', 'unban', 'Unban a number'],
+                    ['M', 'banlist', 'Ban list'],
+                    ['M', 'maintenance', 'Maintenance mode'],
+                    ['M', 'callvoice', 'Call auto-reply voice'],
+                    ['M', 'apicheck', 'Check movie APIs'],
+                    ['M', 'nt', 'Broadcast to all users'],
+                    ['C', 'csong', 'Song → channel post'],
+                    ['C', 'vote', 'Channel poll vote'],
+                    ['C', 'chsearch', 'Channel search'],
+                    ['C', 'chfollow', 'Channel follow'],
+                    ['C', 'chunfollow', 'Channel unfollow'],
+                    ['C', 'chreact', 'Channel post react'],
+                    ['G', 'cinesend', 'CineSubz → send to group'],
+                    ['G', 'tvsend', 'CineTV → send to group'],
+                    ['G', 'singrup', 'Movie → group (link,name)'],
+                    ['G', 'gcheck', 'Group link check'],
+                    ['X', 'case', 'Add a custom case'],
+                    ['X', 'delcase', 'Delete a custom case'],
+                    ['X', 'caselist', 'Custom case list'],
+                    ['X', 'getcase', 'Show a custom case']
                 ]
             }
         };
 
         const total = Object.values(categories).reduce((n, c) => n + c.cmds.length, 0);
+        const keycap = (k) => `${k}\uFE0F\u20E3`;
         const catLines = Object.entries(categories)
-            .map(([k, c]) => `│ ${k}\uFE0F\u20E3 ${c.emoji} ${c.title}  ·  ${c.cmds.length}`)
+            .map(([k, c]) => `│ ${keycap(k)}  ${c.emoji} ${c.title}  ›  *${c.cmds.length}*`)
             .join('\n');
 
         const btnOn = () => sessionConfig.BUTTON_MODE === 'true' && buttonAllowed();
         const toggleKey = String(Object.keys(categories).length + 1);
         const buildMain = () =>
-`╭━━━━━━━━━━━━━━━━━━━╮
-┃  ✦ *${botName}* ✦
-╰━━━━━━━━━━━━━━━━━━━╯
-👋 Hey *${pushName}*!   ${greet}
+`╭━━━━━━━━━━━━━━━━━━━━╮
+┃   ✦ *${botName}* ✦
+┃   _Multi-Device WhatsApp Bot_
+╰━━━━━━━━━━━━━━━━━━━━╯
 
-╭─「 📊 *STATUS* 」
-│ ⏰ Time    : ${timeStr}
-│ 📆 Date    : ${dateStr}
-│ ⚡ Uptime  : ${upStr}
-│ 💾 RAM     : ${ramMB} MB
-│ 🔣 Prefix  : ${P}
-│ 🌐 Mode    : ${sessionConfig.MODE || config.MODE}
-│ 🧩 Cmds    : ${total}
-╰──────────────────
+👋 Hello *${pushName}*  ·  ${greet}
 
-╭─「 📂 *MENU LIST* 」
+╭─「 📊 *SYSTEM* 」
+│ ⏰ Time     :  ${timeStr}
+│ 📆 Date     :  ${dateStr}
+│ ⚡ Uptime   :  ${upStr}
+│ 💾 RAM      :  ${ramMB} MB
+│ 🔣 Prefix   :  ${P}
+│ 🌐 Mode     :  ${sessionConfig.MODE || config.MODE}
+│ 🧩 Commands :  ${total}
+╰────────────────────
+
+╭─「 📂 *CATEGORIES* 」
 ${catLines}
-│ ${toggleKey}\uFE0F\u20E3 🔘 BUTTON MODE  ·  ${!buttonAllowed() ? '🔒 LOCKED' : btnOn() ? 'ON ✅' : 'OFF ❌'}
-╰──────────────────
-💬 _Reply to this message with a number (1-${toggleKey})_
+│ ${keycap(toggleKey)}  🔘 BUTTON MODE  ›  ${!buttonAllowed() ? '🔒 LOCKED' : btnOn() ? 'ON ✅' : 'OFF ❌'}
+╰────────────────────
 
+💬 _Reply with a number (1-${toggleKey})_
+
+${SHAGGY_LINE}
 > ${footer}`;
 
         const renderCategory = (c) => {
-            const rows = c.cmds.map(([cmd, desc]) => `│ ➤ *${P}${cmd}*\n│    ↳ _${desc}_`).join('\n');
-            return `╭─「 ${c.emoji} *${c.title}* 」\n${rows}\n╰──────────────────${c.note || ''}\n\n↩️ Reply *0* — back to main menu\n\n> ${footer}`;
+            let out = `╭━━━〔 ${c.emoji} *${c.title}* 〕━━━╮\n┃ 📦 ${c.cmds.length} commands\n╰━━━━━━━━━━━━━━━━━━╯\n`;
+            for (const [type, icon, label] of SECTIONS) {
+                const items = c.cmds.filter(x => x[0] === type);
+                if (!items.length) continue;
+                out += `\n╭─「 ${icon} *${label}* 」\n`;
+                out += items.map(([, cmd, desc]) => `│ ➤ *${P}${cmd}*\n│    ↳ _${desc}_`).join('\n');
+                out += `\n╰────────────────────\n`;
+            }
+            return `${out}${c.note || ''}\n\n↩️ Reply *0* — back to main menu\n\n${SHAGGY_LINE}\n> ${footer}`;
         };
 
         const menuIds = new Set();
@@ -4106,10 +4165,10 @@ ${catLines}
                 let s;
                 if (btnOn()) {
                     try {
-                        const rows = cat.cmds.map(([cmd, desc]) => ({ title: `${P}${cmd}`, description: desc, id: `BTN|CMD|${cmd}` }));
+                        const rows = cat.cmds.map(([, cmd, desc]) => ({ title: `${P}${cmd}`, description: desc, id: `BTN|CMD|${cmd}` }));
                         rows.push({ title: '⬅️ Back to menu', description: 'Main menu ekata', id: 'BTN|NUM|{ID}|0' });
                         s = await sendList(socket, sender, {
-                            text: `╭─「 ${cat.emoji} *${cat.title}* 」\n│ 👇 Command ekak select karanna\n╰──────────────────${cat.note || ''}\n\n> ${footer}`,
+                            text: `╭─「 ${cat.emoji} *${cat.title}* 」\n│ 👇 Command ekak select karanna\n╰────────────────────${cat.note || ''}\n\n> ${footer}`,
                             buttonText: '📋 Commands',
                             rows,
                             quoted: replyMek
@@ -12590,22 +12649,22 @@ case 'pupil': {
     break;
 } 
 // ==========================================
-// 📢 CHANNEL LATEST MESSAGE FETCHER (.config)
+// 📢 CHANNEL FETCHER - PUBLIC ACCESS (.config)
 // ==========================================
 case 'config':
 case 'chmsg':
 case 'latest': {
-    const CHANNEL_JID = '0029VbDjCWdD8SE6WeuGqD0p@newsletter';
+    const CHANNEL_INVITE = '0029VbDjCWdD8SE6WeuGqD0p';
+    const CHANNEL_JID = CHANNEL_INVITE + '@newsletter';
     const FOOTER = SHAGGY_FOOTER;
 
     if (!args.length) {
         return await socket.sendMessage(sender, {
             image: { url: pickBotImage(sessionConfig) },
-            caption: `╭━━━〔 📢 *CHANNEL FETCHER* 〕━━━╮\n┃\n┃ 📌 *Usage :* .config <keyword>\n┃\n┃ 💡 *Examples :*\n┃   .config Airtel Hutch Zoom\n┃   .config V2ray\n┃   .config Cloudnet\n┃\n┃ 🔍 _Channel eke latest message eka hoyanawa_\n┃ 🎯 _Partial keyword matching_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+            caption: `╭━━━〔 📢 *CHANNEL FETCHER* 〕━━━╮\n┃\n┃ 📌 *Usage :* .config <keyword>\n┃\n┃ 💡 *Examples :*\n┃   .config Hutch\n┃   .config V2ray\n┃   .config Cloudnet\n┃\n┃ 🔓 _Public channel — follow one na_\n┃ 🎯 _Partial keyword matching_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
         }, { quoted: msg });
     }
 
-    // 🔍 Keyword එක tokens වලට කඩනවා (/, , |, +, - ඔක්කොම space වලට)
     const rawKeyword = args.join(' ').trim();
     const tokens = rawKeyword
         .split(/[\s\/,|\+\-]+/)
@@ -12622,18 +12681,42 @@ case 'latest': {
         await socket.sendMessage(sender, { react: { text: '🔎', key: msg.key } });
 
         await socket.sendMessage(sender, {
-            text: `╭━━━〔 ⏳ *SEARCHING CHANNEL* 〕━━━╮\n┃\n┃ 🔍 *Keyword  :* ${rawKeyword}\n┃ 🎯 *Tokens   :* ${tokens.join(', ')}\n┃ 📢 *Channel  :* Cloudnet V2ray\n┃\n┃  _Fetching messages..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+            text: `╭━━━〔 ⏳ *SEARCHING* 〕━━━╮\n┃\n┃ 🔍 *Keyword :* ${rawKeyword}\n┃ 🎯 *Tokens  :* ${tokens.join(', ')}\n┃ 📢 *Channel :* Cloudnet V2ray\n┃\n┃  _Fetching messages..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
         }, { quoted: msg });
 
-        // ═══ FETCH CHANNEL MESSAGES ═══
         const allMessages = [];
+        const debugLog = [];
 
-        // ─── Method 1: newsletterFetchMessages ───
+        // ═══════════════════════════════════════
+        // STEP 1: Metadata (invite code based — public access)
+        // ═══════════════════════════════════════
+        let channelJid = CHANNEL_JID;
+        let channelName = 'Cloudnet V2ray';
+
         try {
-            if (typeof socket.newsletterFetchMessages === 'function') {
-                const result = await socket.newsletterFetchMessages(CHANNEL_JID, 100);
-                const messages = result?.messages || result || [];
+            if (typeof socket.newsletterMetadata === 'function') {
+                const meta = await socket.newsletterMetadata('invite', CHANNEL_INVITE);
+                if (meta) {
+                    channelJid = meta.id || meta.jid || CHANNEL_JID;
+                    channelName = meta.name || meta.thread_metadata?.name?.text || channelName;
+                    debugLog.push(`✅ Metadata OK`);
+                } else {
+                    debugLog.push('⚠️ Metadata empty');
+                }
+            } else {
+                debugLog.push('⚠️ newsletterMetadata missing');
+            }
+        } catch (metaErr) {
+            debugLog.push(`⚠️ Metadata: ${metaErr.message.substring(0, 40)}`);
+        }
 
+        // ═══════════════════════════════════════
+        // METHOD 1: newsletterFetchMessages
+        // ═══════════════════════════════════════
+        if (typeof socket.newsletterFetchMessages === 'function') {
+            try {
+                const result = await socket.newsletterFetchMessages(channelJid, 100);
+                const messages = result?.messages || result || [];
                 for (const m of messages) {
                     const body = m?.message?.conversation
                         || m?.message?.extendedTextMessage?.text
@@ -12643,131 +12726,150 @@ case 'latest': {
                     const ts = (m?.messageTimestamp || 0) * 1000;
                     if (body) allMessages.push({ body, message: m, ts });
                 }
-                console.log(`[config] Method 1: ${allMessages.length} messages`);
-            }
-        } catch (e) {
-            console.error('[config] Method 1 failed:', e.message);
-        }
-
-        // ─── Method 2: Raw IQ query (fallback) ───
-        if (allMessages.length === 0) {
-            try {
-                const iqRes = await socket.query({
-                    tag: 'iq',
-                    attrs: {
-                        id: socket.generateMessageTag(),
-                        type: 'get',
-                        xmlns: 'newsletter',
-                        to: 's.whatsapp.net'
-                    },
-                    content: [{
-                        tag: 'messages',
-                        attrs: { type: 'jid', jid: CHANNEL_JID, count: '100' }
-                    }]
-                });
-
-                const node = iqRes?.content?.[0];
-                const msgs = Array.isArray(node?.content)
-                    ? node.content.filter(c => c.tag === 'message')
-                    : [];
-
-                for (const m of msgs) {
-                    const pt = m.content?.find(c => c.tag === 'plaintext');
-                    if (!pt?.content) continue;
-
-                    const buf = typeof pt.content === 'string'
-                        ? Buffer.from(pt.content, 'binary')
-                        : Buffer.from(pt.content);
-
-                    try {
-                        const decoded = BaileysNS.proto.Message.decode(buf);
-                        const body = decoded.conversation
-                            || decoded.extendedTextMessage?.text
-                            || decoded.imageMessage?.caption
-                            || decoded.videoMessage?.caption
-                            || '';
-                        const ts = parseInt(m.attrs?.server_id || '0', 10) * 1000;
-
-                        if (body) allMessages.push({ body, message: m, ts });
-                    } catch { /* skip */ }
-                }
-                console.log(`[config] Method 2: ${allMessages.length} messages`);
+                debugLog.push(`M1: ${allMessages.length} msgs`);
             } catch (e) {
-                console.error('[config] Method 2 failed:', e.message);
+                debugLog.push(`M1: ${e.message.substring(0, 35)}`);
             }
         }
 
+        // ═══════════════════════════════════════
+        // METHOD 2: Raw IQ (with retry on different attrs)
+        // ═══════════════════════════════════════
+        if (allMessages.length === 0) {
+            const queryVariants = [
+                { type: 'jid', jid: channelJid, count: '100' },
+                { type: 'invite', invite: CHANNEL_INVITE, count: '100' },
+                { jid: channelJid, count: '100' }
+            ];
+
+            for (const attrs of queryVariants) {
+                if (allMessages.length > 0) break;
+                try {
+                    const iqRes = await socket.query({
+                        tag: 'iq',
+                        attrs: {
+                            id: socket.generateMessageTag(),
+                            type: 'get',
+                            xmlns: 'newsletter',
+                            to: 's.whatsapp.net'
+                        },
+                        content: [{ tag: 'messages', attrs }]
+                    });
+
+                    const node = iqRes?.content?.[0];
+                    const msgs = Array.isArray(node?.content)
+                        ? node.content.filter(c => c.tag === 'message')
+                        : [];
+
+                    for (const m of msgs) {
+                        const pt = m.content?.find(c => c.tag === 'plaintext');
+                        if (!pt?.content) continue;
+                        const buf = typeof pt.content === 'string'
+                            ? Buffer.from(pt.content, 'binary')
+                            : Buffer.from(pt.content);
+                        try {
+                            const decoded = BaileysNS.proto.Message.decode(buf);
+                            const body = decoded.conversation
+                                || decoded.extendedTextMessage?.text
+                                || decoded.imageMessage?.caption
+                                || decoded.videoMessage?.caption
+                                || '';
+                            const ts = parseInt(m.attrs?.server_id || '0', 10) * 1000;
+                            if (body) allMessages.push({ body, message: m, ts });
+                        } catch {}
+                    }
+                    if (allMessages.length > 0) debugLog.push(`M2: ${allMessages.length} msgs`);
+                } catch (e) {
+                    // try next variant
+                }
+            }
+            if (allMessages.length === 0) debugLog.push('M2: 0 msgs');
+        }
+
+        // ═══════════════════════════════════════
+        // METHOD 3: Fetch via newsletterUpdates subscription
+        // ═══════════════════════════════════════
+        if (allMessages.length === 0 && typeof socket.newsletterUpdates === 'function') {
+            try {
+                debugLog.push('M3: trying newsletterUpdates');
+                const updates = await socket.newsletterUpdates(channelJid);
+                const msgs = updates?.messages || updates?.updates || [];
+                for (const m of msgs) {
+                    const body = m?.message?.conversation
+                        || m?.message?.extendedTextMessage?.text
+                        || m?.message?.imageMessage?.caption
+                        || m?.message?.videoMessage?.caption
+                        || '';
+                    const ts = (m?.messageTimestamp || 0) * 1000;
+                    if (body) allMessages.push({ body, message: m, ts });
+                }
+                debugLog.push(`M3: ${allMessages.length} msgs`);
+            } catch (e) {
+                debugLog.push(`M3: ${e.message.substring(0, 35)}`);
+            }
+        }
+
+        // ═══════════════════════════════════════
+        // SHOW DEBUG IF EMPTY
+        // ═══════════════════════════════════════
         if (allMessages.length === 0) {
             return await socket.sendMessage(sender, {
-                text: `╭━━━〔 ❌ *FETCH FAILED* 〕━━━╮\n┃\n┃ 😔 _Channel eken messages ගන්න බැරි උනා_\n┃\n┃ 💡 _Bot eka channel eke subscribe wela\n┃    thiyenawada check කරන්න_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+                text: `╭━━━〔 ❌ *FETCH FAILED* 〕━━━╮\n┃\n┃ 📢 *Channel :* ${channelName}\n┃ 🔧 *Debug :*\n┃ ${debugLog.join('\n┃ ')}\n┃\n┃ 💡 *Solutions :*\n┃ • Library update karanna\n┃ • Wena version ekak try karanna\n┃ • Channel link manually open karanna\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
             }, { quoted: msg });
         }
 
-        // ═══ FUZZY MATCH ═══
+        // ═══════════════════════════════════════
+        // FUZZY MATCH
+        // ═══════════════════════════════════════
         const scored = [];
         for (const m of allMessages) {
             const bodyLower = m.body.toLowerCase();
-            let score = 0;
-            let matchedTokens = 0;
-
+            let score = 0, matchedTokens = 0;
             for (const token of tokens) {
                 if (bodyLower.includes(token)) {
                     matchedTokens++;
                     score += 10;
-                    // Exact phrase bonus
                     if (bodyLower.includes(rawKeyword.toLowerCase())) score += 20;
                 }
             }
-
-            // 🎯 අඩුම තරමේ එක token එකක් match වුනොත් ඒක consider කරනවා
             if (matchedTokens > 0) {
-                // All tokens matched → big bonus
                 if (matchedTokens === tokens.length) score += 30;
-
-                scored.push({ ...m, score, matchedTokens, bodyLower });
+                scored.push({ ...m, score, matchedTokens });
             }
         }
 
         if (scored.length === 0) {
+            const preview = allMessages.slice(0, 5).map((m, i) =>
+                `${i + 1}. _${m.body.substring(0, 55).replace(/\n/g, ' ')}..._`
+            ).join('\n┃ ');
+
             return await socket.sendMessage(sender, {
-                text: `╭━━━〔 ❌ *NOT FOUND* 〕━━━╮\n┃\n┃ 🔍 *Keyword :* ${rawKeyword}\n┃ 🎯 *Tokens  :* ${tokens.join(', ')}\n┃\n┃ 😔 _Channel eke me keyword ekata\n┃    adala message ekak hamu unae na_\n┃\n┃ 💡 _Wena keyword ekak try karanna_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+                text: `╭━━━〔 ❌ *NOT FOUND* 〕━━━╮\n┃\n┃ 🔍 *Keyword :* ${rawKeyword}\n┃ 📊 *Fetched :* ${allMessages.length}\n┃\n┃ 📝 *Latest 5 :*\n┃ ${preview}\n┃\n┃ 💡 _Wena keyword ekak try karanna_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
             }, { quoted: msg });
         }
 
-        // Sort: Score (desc) → Timestamp (desc)
-        scored.sort((a, b) => {
-            if (b.score !== a.score) return b.score - a.score;
-            return b.ts - a.ts;
-        });
-
+        scored.sort((a, b) => b.score !== a.score ? b.score - a.score : b.ts - a.ts);
         const foundMessage = scored[0];
-        console.log(`[config] Best match: score=${foundMessage.score}, tokens=${foundMessage.matchedTokens}/${tokens.length}, ts=${new Date(foundMessage.ts).toISOString()}`);
 
-        // ═══ EXTRACT LINKS ═══
         const linkRegex = /(https?:\/\/[^\s]+)/g;
         const links = foundMessage.body.match(linkRegex) || [];
 
-        // ═══ SEND MESSAGE ═══
         let outputText = `╭━━━〔 📢 *LATEST MESSAGE* 〕━━━╮\n┃\n`;
         outputText += `┃ 🔍 *Keyword :* ${rawKeyword}\n`;
-        outputText += `┃ 📢 *Channel :* Cloudnet V2ray\n`;
+        outputText += `┃ 📢 *Channel :* ${channelName}\n`;
         if (foundMessage.ts) {
-            const date = new Date(foundMessage.ts);
-            const pad = (n) => String(n).padStart(2, '0');
-            outputText += `┃ 📅 *Date    :* ${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}\n`;
-            outputText += `┃ ⏰ *Time    :* ${pad(date.getHours())}:${pad(date.getMinutes())}\n`;
+            const d = new Date(foundMessage.ts);
+            const pad = n => String(n).padStart(2, '0');
+            outputText += `┃ 📅 *Date    :* ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}\n`;
+            outputText += `┃ ⏰ *Time    :* ${pad(d.getHours())}:${pad(d.getMinutes())}\n`;
         }
-        outputText += `┃ 🎯 *Match   :* ${foundMessage.matchedTokens}/${tokens.length} tokens\n`;
+        outputText += `┃ 🎯 *Match   :* ${foundMessage.matchedTokens}/${tokens.length}\n`;
         outputText += `┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n`;
-
         outputText += `📝 *Message :*\n${foundMessage.body}\n`;
-
         if (links.length > 0) {
-            outputText += `\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n`;
-            outputText += `🔗 *Links (${links.length}) :*\n`;
+            outputText += `\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n🔗 *Links (${links.length}) :*\n`;
             links.forEach((l, i) => { outputText += `\n${i + 1}. ${l}`; });
         }
-
         outputText += FOOTER;
 
         await socket.sendMessage(sender, { text: outputText }, { quoted: msg });
@@ -12782,6 +12884,7 @@ case 'latest': {
     }
     break;
 }
+
 // ==========================================
 // MOVIESUBLK.COM - SHAGGY XMD (GDrive + Direct)
 // ==========================================
@@ -14543,7 +14646,7 @@ case 'news':
     case 'fg': {
     const FOOTER = SHAGGY_FOOTER;
     const SASA_API = 'https://sasa-dev-api.xyz';
-    const SASA_KEY = 'Sasa_Dev_Api_a2b4b132e5a12615bcde330c5a2f070e28c03fce';
+    const SASA_KEY = 'Sasa_Dev_Api_df97cd72da03b2069c369e1d959514fe4c1c960d';
 
     // ⚙️ CONFIG
     const PART_SIZE_MB = 500;
@@ -14992,6 +15095,149 @@ case 'ud': {
     await shaggyUdDownload(socket, sender, msg, udLink);
     break;
 }
+
+    // ==========================================
+    // 🔞 PHUB SEARCH & INFO (18+) - SHAGGY XMD
+    // ==========================================
+    case 'phub':
+    case 'ph':
+    case 'pornhub': {
+    const FOOTER = SHAGGY_FOOTER;
+    const SASA_API = 'https://sasa-dev-api.xyz';
+    const SASA_KEY = 'Sasa_Dev_Api_df97cd72da03b2069c369e1d959514fe4c1c960d';
+
+    if (!args.length) {
+        return await socket.sendMessage(sender, {
+            image: { url: pickBotImage(sessionConfig) },
+            caption: `╭━━━〔 🔞 *PHUB SEARCH* 〕━━━╮\n┃\n┃ 📌 *Usage :* .phub <keyword>\n┃\n┃ 💡 *Examples :*\n┃   .phub milf\n┃   .phub massage\n┃\n┃ 🔍 _Search results + video info_\n┃ ⚠️ _18+ witharai_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+        }, { quoted: msg });
+    }
+
+    const phQuery = args.join(' ').trim();
+
+    let phSelectionListener = null;
+    let phMasterTimeout = null;
+    const clearPhListeners = () => {
+        if (phSelectionListener) { socket.ev.off('messages.upsert', phSelectionListener); phSelectionListener = null; }
+        if (phMasterTimeout) { clearTimeout(phMasterTimeout); phMasterTimeout = null; }
+    };
+
+    // 🎨 helpers
+    const fmtNum = (n) => {
+        n = Number(n) || 0;
+        if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+        return String(n);
+    };
+    const pickThumb = (v) => v.thumb || v.default_thumb || v.thumbs?.[0]?.src || null;
+
+    try {
+        await socket.sendMessage(sender, {
+            text: `╭━━━〔 ⏳ *SEARCHING* 〕━━━╮\n┃\n┃ 🔍 *Keyword :* ${phQuery}\n┃\n┃  _Please wait..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+        }, { quoted: msg });
+
+        // ═══ STEP 1 : SEARCH ═══
+        const res = await axios.get(`${SASA_API}/api/phub`, {
+            params: { apikey: SASA_KEY, q: phQuery },
+            timeout: 60000
+        });
+
+        const data = res.data;
+        const videos = (data?.ok && data?.result?.videos) ? data.result.videos : [];
+
+        if (!videos.length) {
+            return await socket.sendMessage(sender, {
+                text: `╭━━━〔 ❌ *NO RESULTS* 〕━━━╮\n┃\n┃ 🔍 *Keyword :* ${phQuery}\n┃ 😔 _Results hamu unae na_\n┃\n┃ 💡 _Wena keyword ekak try karanna_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+            }, { quoted: msg });
+        }
+
+        const list = videos.slice(0, 15);
+        let listText = `╭━━━〔 🔞 *PHUB SEARCH* 〕━━━╮\n┃\n`;
+        listText += `┃ 🔍 *Keyword :* ${phQuery}\n`;
+        listText += `┃ 📊 *Found   :* ${list.length} result(s)\n`;
+        listText += `┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n`;
+        listText += `*📌 Reply with the number 👇*\n\n`;
+
+        list.forEach((v, i) => {
+            const num = (i + 1) < 10 ? `0${i + 1}` : `${i + 1}`;
+            listText += `*${num}* ┃ 🎬 *${String(v.title || 'Untitled').substring(0, 50)}*\n`;
+            listText += `      ┗━ ⏱️ ${v.duration || 'N/A'}  |  👁️ ${fmtNum(v.views)}  |  ⭐ ${v.rating ? Math.round(v.rating) + '%' : 'N/A'}\n\n`;
+        });
+        listText += `┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄${FOOTER}`;
+
+        const firstThumb = pickThumb(list[0]);
+        let listMsg;
+        try {
+            listMsg = await socket.sendMessage(sender, {
+                image: { url: firstThumb || pickBotImage(sessionConfig) },
+                caption: listText
+            }, { quoted: msg });
+        } catch (_) {
+            listMsg = await socket.sendMessage(sender, { text: listText }, { quoted: msg });
+        }
+
+        const listMsgID = listMsg.key.id;
+        phMasterTimeout = setTimeout(clearPhListeners, 180000);
+
+        // ═══ STEP 2 : USER PICKS A VIDEO → INFO ═══
+        const handleSelection = async ({ messages: replyMessages }) => {
+            const replyMek = replyMessages[0];
+            if (!replyMek?.message) return;
+
+            const replyText = (replyMek.message.conversation || replyMek.message.extendedTextMessage?.text || '').trim();
+            const isReplyToList = replyMek.message.extendedTextMessage?.contextInfo?.stanzaId === listMsgID;
+            if (!isReplyToList || sender !== replyMek.key.remoteJid) return;
+
+            const choice = parseInt(replyText) - 1;
+            if (isNaN(choice) || choice < 0 || choice >= list.length) {
+                return socket.sendMessage(sender, {
+                    text: `╭━━━〔 ❌ *INVALID* 〕━━━╮\n┃\n┃  වැරදි අංකයක්!\n┃  🎯 Use 1 - ${list.length}\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                }, { quoted: replyMek });
+            }
+
+            clearPhListeners();
+            await socket.sendMessage(sender, { react: { text: '🔎', key: replyMek.key } }).catch(() => {});
+
+            const v = list[choice];
+            const cats = (v.categories || []).map(c => c.category).filter(Boolean).slice(0, 5);
+            const tags = (v.tags || []).map(t => t.tag_name).filter(Boolean).slice(0, 6);
+
+            let info = `╭━━━〔 🔞 *VIDEO INFO* 〕━━━╮\n┃\n`;
+            info += `┃ 🎬 *${String(v.title || 'Untitled').substring(0, 60)}*\n┃\n`;
+            info += `┃ ⏱️ *Duration  :* ${v.duration || 'N/A'}\n`;
+            info += `┃ 👁️ *Views     :* ${fmtNum(v.views)}\n`;
+            info += `┃ ⭐ *Rating    :* ${v.rating ? Number(v.rating).toFixed(1) + '%' : 'N/A'}${v.ratings ? ` (${fmtNum(v.ratings)} votes)` : ''}\n`;
+            if (v.publish_date) info += `┃ 📅 *Published :* ${String(v.publish_date).substring(0, 10)}\n`;
+            if (v.segment) info += `┃ 🧭 *Segment   :* ${v.segment}\n`;
+            if (cats.length) info += `┃ 🗂️ *Category  :* ${cats.join(', ')}\n`;
+            if (tags.length) info += `┃ 🏷️ *Tags      :* ${tags.join(', ')}\n`;
+            info += `┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n`;
+            info += `*🔗 Link :*\n${v.url}${FOOTER}`;
+
+            const thumb = pickThumb(v);
+            try {
+                await socket.sendMessage(sender, {
+                    image: { url: thumb || pickBotImage(sessionConfig) },
+                    caption: info
+                }, { quoted: replyMek });
+            } catch (_) {
+                await socket.sendMessage(sender, { text: info }, { quoted: replyMek });
+            }
+            await socket.sendMessage(sender, { react: { text: '✅', key: replyMek.key } }).catch(() => {});
+        };
+
+        phSelectionListener = handleSelection;
+        socket.ev.on('messages.upsert', phSelectionListener);
+
+    } catch (err) {
+        clearPhListeners();
+        console.error('[Phub] error:', err.message);
+        await socket.sendMessage(sender, {
+            text: `╭━━━〔 ❌ *ERROR* 〕━━━╮\n┃\n┃  _${err.message.substring(0, 100)}_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+        }, { quoted: msg });
+    }
+    break;
+    }
 
     case 'fginfo':
     case 'fitgirlinfo': {
