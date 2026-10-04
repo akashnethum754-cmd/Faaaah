@@ -3984,8 +3984,6 @@ case 'help': {
                     ['I', 'weather', 'Weather report'],
                     ['I', 'news', 'Sri Lanka news'],
                     ['I', 'config', 'Channel latest message'],
-                    ['I', 'groupinfo', 'Group info'],
-                    ['I', 'jid', 'Get chat JID'],
                     ['T', 'ai', 'AI chat'],
                     ['T', 'aiimage', 'AI image generator'],
                     ['T', 'sticker', 'Image → sticker'],
@@ -3993,11 +3991,23 @@ case 'help': {
                     ['T', 'qr', 'QR code generator'],
                     ['T', 'short', 'URL shortener'],
                     ['T', 'calc', 'Calculator'],
-                    ['T', 'schedule', 'Schedule a message'],
-                    ['T', 'tagall', 'Tag everyone (group)']
+                    ['T', 'schedule', 'Schedule a message']
                 ]
             },
             '6': {
+                emoji: '👥', title: 'GROUP',
+                note: '\n⚠️ _Group send commands = owner only_',
+                cmds: [
+                    ['I', 'groupinfo', 'Group info'],
+                    ['I', 'jid', 'Get group / chat JID'],
+                    ['I', 'gcheck', 'Group link check  (owner)'],
+                    ['T', 'tagall', 'Tag everyone in group'],
+                    ['G', 'cinesend', 'CineSubz → send to group  (owner)'],
+                    ['G', 'tvsend', 'CineTV → send to group  (owner)'],
+                    ['G', 'singrup', 'Movie → group  (.singrup link,name)  (owner)']
+                ]
+            },
+            '7': {
                 emoji: '🔞', title: 'ADULT 18+',
                 note: '\n⚠️ _18+ witharai_',
                 cmds: [
@@ -4005,7 +4015,7 @@ case 'help': {
                     ['S', 'phub', 'Phub · search & video info']
                 ]
             },
-            '7': {
+            '8': {
                 emoji: '⚙️', title: 'GENERAL',
                 cmds: [
                     ['I', 'alive', 'Bot status'],
@@ -4018,7 +4028,7 @@ case 'help': {
                     ['T', 'getkey', 'Web panel access key']
                 ]
             },
-            '8': {
+            '9': {
                 emoji: '👑', title: 'OWNER & ADMIN',
                 adminOnly: true,
                 note: '\n⚠️ _Admin / owner only_',
@@ -4044,10 +4054,6 @@ case 'help': {
                     ['C', 'chfollow', 'Channel follow'],
                     ['C', 'chunfollow', 'Channel unfollow'],
                     ['C', 'chreact', 'Channel post react'],
-                    ['G', 'cinesend', 'CineSubz → send to group'],
-                    ['G', 'tvsend', 'CineTV → send to group'],
-                    ['G', 'singrup', 'Movie → group (link,name)'],
-                    ['G', 'gcheck', 'Group link check'],
                     ['X', 'case', 'Add a custom case'],
                     ['X', 'delcase', 'Delete a custom case'],
                     ['X', 'caselist', 'Custom case list'],
@@ -4057,7 +4063,7 @@ case 'help': {
         };
 
         const total = Object.values(categories).reduce((n, c) => n + c.cmds.length, 0);
-        const keycap = (k) => `${k}\uFE0F\u20E3`;
+        const keycap = (k) => (String(k) === '10' ? '🔟' : `${k}\uFE0F\u20E3`);
         const catLines = Object.entries(categories)
             .map(([k, c]) => `│ ${keycap(k)}  ${c.emoji} ${c.title}  ›  *${c.cmds.length}*`)
             .join('\n');
