@@ -7704,6 +7704,10 @@ case 'ax': {
     const downloadToServer = async (url, dest) => { await robustDownload(url, dest, 'https://animexin.dev/'); return fs.stat(dest); };
 
     // Episode URL එකක්ද කියලා check කරනවා
+    // API eken ewana 'url' eka sam sam welawata poster image ekak (.jpg) wenawa => page link eka thoranawa
+    const isImgUrl = (u) => /\.(jpe?g|png|webp|gif|svg|avif)(\?.*)?$/i.test(u || '');
+    const pickPageUrl = (o = {}) => [o.link, o.url, o.href, o.series_url, o.page_url, o.permalink, o.episode_url]
+        .find((u) => typeof u === 'string' && /^https?:\/\//i.test(u) && !isImgUrl(u)) || null;
     const isEpisodeUrl = (url = '') => /episode[-_]?\d+/i.test(url) || /ep[-_]?\d+/i.test(url);
 
     try {
@@ -7718,7 +7722,9 @@ case 'ax': {
         });
 
         const searchData = searchRes.data;
-        const results = searchData.data || [];
+        const rawResults = searchData.data || [];
+        const goodResults = rawResults.filter((r) => pickPageUrl(r));      // image link witharak thiyena ewa ain karanawa
+        const results = goodResults.length ? goodResults : rawResults;
 
         if (!searchData.status || results.length === 0) {
             await socket.sendMessage(sender, {
@@ -7782,8 +7788,13 @@ case 'ax': {
 
                 try {
                     // ═══ STEP 3 : SERIES INFO (episodes list) ═══
+                    const seriesUrl = pickPageUrl(selectedSeries);
+                    if (!seriesUrl) {
+                        console.error('[Animexin] no page url in item:', JSON.stringify(selectedSeries).slice(0, 300));
+                        throw new Error('Me series eke page link eka hoyaganna baha (API eken image link ekak witharai awa). Wena result ekak try karanna.');
+                    }
                     const infoRes = await axios.get(`${API_BASE}/infodl`, {
-                        params: { q: selectedSeries.url, api_key: API_KEY },
+                        params: { q: seriesUrl, api_key: API_KEY },
                         timeout: 120000
                     });
                     const seriesData = infoRes.data.data || {};
@@ -7846,7 +7857,11 @@ case 'ax': {
                         if (axEpisodeListener) { socket.ev.off('messages.upsert', axEpisodeListener); axEpisodeListener = null; }
 
                         const selectedEp = displayEps[epIdx];
-                        const epUrl = selectedEp.url || selectedEp.link;
+                        const epUrl = pickPageUrl(selectedEp);
+                        if (!epUrl) {
+                            console.error('[Animexin] no page url in episode:', JSON.stringify(selectedEp).slice(0, 300));
+                            return socket.sendMessage(sender, { text: `⚠️ *Me episode eke link eka hoyaganna baha.* Wena episode ekak try karanna.${DEFAULT_FOOTER}` }, { quoted: epMek });
+                        }
 
                         await socket.sendMessage(sender, {
                             text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗙𝗘𝗧𝗖𝗛𝗜𝗡𝗚 ❫*\n\n📺 *Episode ${selectedEp.episode_number || epIdx + 1}*\n⚡ _Fetching download links..._`
