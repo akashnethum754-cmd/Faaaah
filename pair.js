@@ -721,6 +721,8 @@ async function readSmallBody(stream, max = 400000) {
 
 // Known file-host pages => direct file URL (MHBCLOUD pages walata Pixeldrain mirror eka thiyenawa)
 function normalizeDownloadUrl(u) {
+    const gd = String(u).match(/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:[^#]*&)?id=)([A-Za-z0-9_-]{10,})/i);
+    if (gd) return `https://drive.usercontent.google.com/download?id=${gd[1]}&export=download&confirm=t`;
     const pd = String(u).match(/^https?:\/\/(?:www\.)?pixeldrain\.(?:com|net)\/u\/([A-Za-z0-9]+)/i);
     return pd ? `https://pixeldrain.com/api/file/${pd[1]}?download` : u;
 }
@@ -989,6 +991,7 @@ async function runApiChecks() {
         ch('watchwrestling', '/api/v1/wrestling/watchwrestling/search', 'wwe'),
         ch('moviebox', '/api/v1/movies/moviebox/search'),
         ch('cineru', '/api/v1/movies/cineru/search'),
+        ch('mflix', '/api/v1/movies/mflix/search'),
         ch('animeheaven (.anime)', '/api/v1/anime/animeheaven/search', 'Solo Leveling'),
         { name: 'telegram resolver', url: `${CH_BASE}/api/v1/telegram/dl`, params: { url: 'https://t.me/dinkamovieslk/176', api_key: CH_KEY } },
         { name: 'dubzone (heroku)', url: 'https://api-siteh-22e22e4cb068.herokuapp.com/api/dubzone/search', params: { q: Q } },
@@ -1430,7 +1433,7 @@ const MOVIE_COMMANDS = new Set([
     'moviemania','mm','mmlk','cin','cinz','cmovie','subzlk','subz','chithrapata','chithra','chmovie','dubzone',
     'dubzonesearch','thinkiri','thenkiri','sinhalatop','sinhalatopsearch','cinbz','cinetv','pupilmovie','pupil',
     'moviesublk','msubz','mslk','movieall','m','anime','animexin','donghua','ax','cartoon','cartoonlk','cartoon2',
-    'sinhalacartoon','wrestling','watchwrestling','rexporn','rxporn','rp','tg','telegram','tgdl','moviebox','mbox','cineru','cru'
+    'sinhalacartoon','wrestling','watchwrestling','rexporn','rxporn','rp','tg','telegram','tgdl','moviebox','mbox','cineru','cru','mflix','mfl','kdrama'
 ]);
 
 const isVideoDoc = (c) => {
@@ -15221,6 +15224,407 @@ case 'cru': {
         clearAllCrListeners();
         await socket.sendMessage(sender, {
             text: `*❪ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗘𝗥𝗥𝗢𝗥 ❫*\n\n❌ *Search Error:* ${err.message}${DEFAULT_FOOTER}`
+        }, { quoted: msg });
+    }
+    break;
+}
+
+// ==========================================
+// 🎬 MFLIX - SHAGGY XMD (New Modern UI)
+// ==========================================
+case 'mflix':
+case 'mfl':
+case 'kdrama': {
+    const FOOTER = `\n\n┗━━━━━━━━━━━━━━━━━━┛\n> 🎬 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 🎬`;
+    const TEMP_DIR = './tmp_mflix';
+
+    // 🎨 Common UI styles
+    const UI = {
+        header: (title) => `┏━━━━━━━━━━━━━━━━━━┓\n┃  ${title}\n┗━━━━━━━━━━━━━━━━━━┛`,
+        loading: (text) => `╭━━━〔 ⏳ *LOADING* 〕━━━╮\n┃\n┃  ${text}\n┃\n╰━━━━━━━━━━━━━━━━━━╯`,
+        error: (text) => `╭━━━〔 ❌ *ERROR* 〕━━━╮\n┃\n┃  ${text}\n┃\n╰━━━━━━━━━━━━━━━━━━╯`,
+        success: (text) => `╭━━━〔 ✅ *SUCCESS* 〕━━━╮\n┃\n┃  ${text}\n┃\n╰━━━━━━━━━━━━━━━━━━╯`,
+        info: (title, body) => `╭━━━〔 🎬 *${title}* 〕━━━╮\n${body}\n╰━━━━━━━━━━━━━━━━━━╯`,
+        divider: `┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄`
+    };
+
+    if (!args.length) {
+        return await socket.sendMessage(sender, {
+            image: { url: pickBotImage(sessionConfig) },
+            caption: UI.info('MFLIX SEARCH', `\n┃ 📌 *Usage :* .mflix Dream to You\n┃ 📌 *Usage :* .mflix Vincenzo\n┃\n┃ 💡 _K-Drama / Movie / Series නම දෙන්න_${FOOTER}`)
+        }, { quoted: msg });
+    }
+
+    const mflixQuery = args.join(' ').trim();
+    const API_BASE = CH_BASE + '/api/v1/movies/mflix';
+    const API_KEY = CH_KEY;
+
+    let mfSelectionListener = null;
+    let mfEpisodeListener = null;
+    let mfServerListener = null;
+    let mfMasterTimeout = null;
+
+    const clearAllMfListeners = () => {
+        if (mfSelectionListener) { socket.ev.off('messages.upsert', mfSelectionListener); mfSelectionListener = null; }
+        if (mfEpisodeListener)   { socket.ev.off('messages.upsert', mfEpisodeListener);   mfEpisodeListener   = null; }
+        if (mfServerListener)    { socket.ev.off('messages.upsert', mfServerListener);    mfServerListener    = null; }
+        if (mfMasterTimeout)     { clearTimeout(mfMasterTimeout); mfMasterTimeout = null; }
+    };
+
+    const cleanMflixTitle = (t = '') =>
+        t.replace(/\s*\|\s*සිංහල උපසිරැසි සමඟ.*$/i, '')
+         .replace(/\s*Sinhala Subtitles.*$/i, '')
+         .trim();
+
+    const parseSizeMB = (s) => {
+        if (!s) return 0;
+        const m = s.toString().toUpperCase().replace(/\s/g, '').match(/([\d.]+)(GB|MB|KB)/);
+        if (!m) return 0;
+        const v = parseFloat(m[1]);
+        const u = m[2];
+        if (u === 'GB') return v * 1024;
+        if (u === 'MB') return v;
+        return 0;
+    };
+
+    const extractEpisode = (name = '') => {
+        const m = name.match(/\bEP?(\d{1,3})\b/i);
+        return m ? parseInt(m[1], 10) : null;
+    };
+
+    const extractQuality = (name = '') => {
+        const m = name.match(/\b(360|480|540|720|1080|2160)p?\b/i);
+        return m ? m[1] + 'p' : null;
+    };
+
+    const detectServer = (name = '') => {
+        const n = name.toLowerCase();
+        if (n.includes('google drive') || n.includes('gdrive')) return { icon: '📁', name: 'GDrive', type: 'gdrive' };
+        if (n.includes('voe')) return { icon: '⚡', name: 'Voe', type: 'voe' };
+        if (n.includes('hgcloud')) return { icon: '🚀', name: 'HgCloud', type: 'hgcloud' };
+        if (n.includes('telegram')) return { icon: '✈️', name: 'Telegram', type: 'telegram' };
+        if (n.includes('subtitle')) return { icon: '📝', name: 'Subtitle', type: 'subtitle' };
+        return { icon: '🔗', name: 'Other', type: 'other' };
+    };
+
+    const downloadToServer = async (url, dest) => { await robustDownload(url, dest, 'https://www.mflixlk.com/'); return fs.stat(dest); };
+
+    // ==========================================
+    // 🚀 MAIN FLOW
+    // ==========================================
+    try {
+        // ═══ LOADING PREVIEW ═══
+        await socket.sendMessage(sender, {
+            text: UI.loading(`🔍 Searching for *${mflixQuery}*...\n┃  _Please wait a moment_`)
+        }, { quoted: msg });
+
+        // ═══ STEP 1 : SEARCH ═══
+        const searchRes = await axios.get(`${API_BASE}/search`, {
+            params: { q: mflixQuery, api_key: API_KEY },
+            timeout: 120000
+        });
+
+        const searchData = searchRes.data;
+        const results = searchData.data || [];
+
+        if (!searchData.status || results.length === 0) {
+            return await socket.sendMessage(sender, {
+                image: { url: pickBotImage(sessionConfig) },
+                caption: UI.info('NO RESULTS FOUND', `\n┃ 🔍 *Query :* ${mflixQuery}\n┃ 😔 _කිසිදු ප්‍රතිඵලයක් හමු නොවීය_\n┃\n┃ 💡 _Spelling check කරලා ආයෙ try කරන්න_${FOOTER}`)
+            }, { quoted: msg });
+        }
+
+        const list = results.slice(0, 15);
+
+        // ═══ SEARCH RESULTS UI ═══
+        let listText = `╭━━━〔 🔍 *SEARCH RESULTS* 〕━━━╮\n`;
+        listText += `┃\n`;
+        listText += `┃ 🎯 *Query :* ${mflixQuery}\n`;
+        listText += `┃ 📊 *Found :* ${list.length} item(s)\n`;
+        listText += `┃\n`;
+        listText += `╰━━━━━━━━━━━━━━━━━━╯\n\n`;
+        listText += `*📌 Reply with the number 👇*\n\n`;
+
+        list.forEach((item, index) => {
+            const num = (index + 1) < 10 ? `0${index + 1}` : `${index + 1}`;
+            const typeIcon = item.type === 'tvshows' ? '📺' : '🎥';
+            const rating = item.rating && item.rating !== 'N/A' ? `⭐ ${item.rating}` : '⭐ N/A';
+            const quality = item.quality || 'HD';
+            listText += `*${num}* ┃ ${typeIcon} *${cleanMflixTitle(item.title).substring(0, 40)}*\n`;
+            listText += `      ┗━ ${rating}  ┃  🎞 ${quality}\n\n`;
+        });
+
+        listText += `┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄${FOOTER}`;
+
+        const searchMsg = await socket.sendMessage(sender, {
+            image: { url: list[0].image || pickBotImage(sessionConfig) },
+            caption: listText
+        }, { quoted: msg });
+
+        const searchMsgID = searchMsg.key.id;
+        mfMasterTimeout = setTimeout(clearAllMfListeners, 180000);
+
+        // ═══ STEP 2 : USER PICKS ═══
+        const handleSelection = async ({ messages: replyMessages }) => {
+            const replyMek = replyMessages[0];
+            if (!replyMek?.message) return;
+
+            const messageType = replyMek.message.conversation || replyMek.message.extendedTextMessage?.text;
+            const isReplyToSentMsg = replyMek.message.extendedTextMessage?.contextInfo?.stanzaId === searchMsgID;
+
+            if (isReplyToSentMsg && sender === replyMek.key.remoteJid) {
+                const choice = parseInt(messageType) - 1;
+                if (isNaN(choice) || choice < 0 || choice >= list.length) {
+                    return socket.sendMessage(sender, {
+                        text: UI.error(`වැරදි අංකයක්!\n┃ 🎯 Use 1 - ${list.length}`)
+                    }, { quoted: replyMek });
+                }
+
+                if (mfSelectionListener) { socket.ev.off('messages.upsert', mfSelectionListener); mfSelectionListener = null; }
+
+                const selectedItem = list[choice];
+
+                await socket.sendMessage(sender, {
+                    text: UI.loading(`🎬 Fetching details for\n┃  *${cleanMflixTitle(selectedItem.title)}*`)
+                }, { quoted: replyMek });
+
+                try {
+                    // ═══ STEP 3 : INFO ═══
+                    const detailsRes = await axios.get(`${API_BASE}/infodl`, {
+                        params: { q: selectedItem.link, api_key: API_KEY },
+                        timeout: 120000
+                    });
+                    const movieInfo = detailsRes.data.data || {};
+                    const allDownloads = movieInfo.downloads || [];
+                    const cleanTitle = cleanMflixTitle(movieInfo.title || selectedItem.title);
+
+                    if (allDownloads.length === 0) {
+                        return socket.sendMessage(sender, {
+                            text: UI.error(`Download links හමු නොවීය!\n┃ 🎬 ${cleanTitle}`)
+                        }, { quoted: replyMek });
+                    }
+
+                    // ═══ GROUP EPISODES ═══
+                    const episodeMap = new Map();
+                    allDownloads.forEach((dl) => {
+                        const ep = extractEpisode(dl.name) || 0;
+                        if (!episodeMap.has(ep)) episodeMap.set(ep, []);
+                        episodeMap.get(ep).push(dl);
+                    });
+                    const episodeNumbers = [...episodeMap.keys()].sort((a, b) => a - b);
+
+                    // ═══ DETAILS UI ═══
+                    const asList = (v) => Array.isArray(v) ? v.map((x) => (typeof x === 'string' ? x : x?.name || '')).filter(Boolean) : String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
+                    let detailsText = `╭━━━〔 🎬 *${cleanTitle.substring(0, 25)}* 〕━━━╮\n`;
+                    detailsText += `┃\n`;
+                    if (movieInfo.imdb) detailsText += `┃ ⭐ *IMDb    :* ${movieInfo.imdb}\n`;
+                    if (movieInfo.director) detailsText += `┃ 🎬 *Director:* ${movieInfo.director}\n`;
+                    if (movieInfo.language) detailsText += `┃ 🗣️ *Language:* ${movieInfo.language}\n`;
+                    if (asList(movieInfo.genres).length) detailsText += `┃ 🎭 *Genres  :* ${asList(movieInfo.genres).slice(0, 3).join(', ')}\n`;
+                    if (asList(movieInfo.cast).length) detailsText += `┃ 👥 *Cast    :* ${asList(movieInfo.cast).slice(0, 3).join(', ')}\n`;
+                    detailsText += `┃\n`;
+                    detailsText += `┃ 📺 *Episodes:* ${episodeNumbers.length}\n`;
+                    detailsText += `┃ 📊 *Total   :* ${allDownloads.length} links\n`;
+                    detailsText += `┃\n`;
+                    detailsText += `╰━━━━━━━━━━━━━━━━━━╯`;
+
+                    if (movieInfo.story) {
+                        const story = movieInfo.story.length > 200 ? movieInfo.story.substring(0, 200) + '...' : movieInfo.story;
+                        detailsText += `\n\n📖 *Story :*\n_${story}_`;
+                    }
+                    detailsText += FOOTER;
+
+                    await socket.sendMessage(sender, {
+                        image: { url: movieInfo.image || selectedItem.image || pickBotImage(sessionConfig) },
+                        caption: detailsText
+                    }, { quoted: replyMek });
+
+                    // ═══ STEP 4 : EPISODE SELECTION UI ═══
+                    let epText = `╭━━━〔 📺 *SELECT EPISODE* 〕━━━╮\n`;
+                    epText += `┃\n`;
+                    epText += `┃ 🎬 *${cleanTitle.substring(0, 25)}*\n`;
+                    epText += `┃ 📊 *${episodeNumbers.length} Episodes* available\n`;
+                    epText += `┃\n`;
+                    epText += `╰━━━━━━━━━━━━━━━━━━╯\n\n`;
+                    epText += `*📌 Reply with episode number 👇*\n\n`;
+
+                    episodeNumbers.forEach((epNum, idx) => {
+                        const num = (idx + 1) < 10 ? `0${idx + 1}` : `${idx + 1}`;
+                        const epLinks = episodeMap.get(epNum);
+                        const servers = [...new Set(epLinks.map(d => detectServer(d.name).icon))].join(' ');
+                        epText += `*${num}* ┃ 📺 *Episode ${epNum || 'Movie'}*  ┃ ${servers}\n`;
+                    });
+
+                    epText += `\n💡 _icons: 📁 GDrive • ⚡ Voe • 🚀 HgCloud • ✈️ Telegram_${FOOTER}`;
+
+                    const epMsg = await socket.sendMessage(sender, { text: epText }, { quoted: replyMek });
+                    const epMsgID = epMsg.key.id;
+
+                    // ═══ STEP 5 : USER PICKS EPISODE ═══
+                    const handleEpisode = async ({ messages: epMessages }) => {
+                        const epMek = epMessages[0];
+                        if (!epMek?.message || epMek.key.remoteJid !== sender) return;
+
+                        const epChoiceText = epMek.message.conversation || epMek.message.extendedTextMessage?.text;
+                        if (epMek.message.extendedTextMessage?.contextInfo?.stanzaId !== epMsgID) return;
+
+                        const epIdx = parseInt(epChoiceText) - 1;
+                        if (isNaN(epIdx) || epIdx < 0 || epIdx >= episodeNumbers.length) {
+                            return socket.sendMessage(sender, {
+                                text: UI.error(`වැරදි Episode අංකයක්!\n┃ 🎯 Use 1 - ${episodeNumbers.length}`)
+                            }, { quoted: epMek });
+                        }
+
+                        if (mfEpisodeListener) { socket.ev.off('messages.upsert', mfEpisodeListener); mfEpisodeListener = null; }
+
+                        const selectedEpNum = episodeNumbers[epIdx];
+                        const epLinks = episodeMap.get(selectedEpNum);
+
+                        // ═══ STEP 6 : SERVER SELECTION UI ═══
+                        let serverText = `╭━━━〔 📥 *SELECT SERVER* 〕━━━╮\n`;
+                        serverText += `┃\n`;
+                        serverText += `┃ 🎬 *${cleanTitle.substring(0, 22)}*\n`;
+                        serverText += `┃ 📺 *Episode ${selectedEpNum || 'Movie'}*\n`;
+                        serverText += `┃ 📊 *${epLinks.length} servers* available\n`;
+                        serverText += `┃\n`;
+                        serverText += `╰━━━━━━━━━━━━━━━━━━╯\n\n`;
+                        serverText += `*📌 Reply with server number 👇*\n\n`;
+
+                        epLinks.forEach((dl, i) => {
+                            const num = (i + 1) < 10 ? `0${i + 1}` : `${i + 1}`;
+                            const srv = detectServer(dl.name);
+                            const quality = dl.quality || extractQuality(dl.name) || 'HD';
+                            const size = dl.size || 'N/A';
+                            const sizeMB = parseSizeMB(size);
+                            const isTelegram = srv.type === 'telegram';
+                            const warn = !isTelegram && sizeMB > 2000 ? ' ⚠️' : '';
+                            serverText += `*${num}* ┃ ${srv.icon} *${srv.name}*  ┃ 🎞 ${quality}\n`;
+                            serverText += `      ┗━ 📦 ${size}${warn}\n\n`;
+                        });
+
+                        serverText += `┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n`;
+                        serverText += `📁 GDrive • ⚡ Voe • 🚀 HgCloud = Direct MP4\n`;
+                        serverText += `✈️ Telegram = External Link${FOOTER}`;
+
+                        const serverMsg = await socket.sendMessage(sender, { text: serverText }, { quoted: epMek });
+                        const serverMsgID = serverMsg.key.id;
+
+                        // ═══ STEP 7 : USER PICKS SERVER ═══
+                        const handleServer = async ({ messages: srvMessages }) => {
+                            const srvMek = srvMessages[0];
+                            if (!srvMek?.message || srvMek.key.remoteJid !== sender) return;
+
+                            const srvChoiceText = srvMek.message.conversation || srvMek.message.extendedTextMessage?.text;
+                            if (srvMek.message.extendedTextMessage?.contextInfo?.stanzaId !== serverMsgID) return;
+
+                            const srvIdx = parseInt(srvChoiceText) - 1;
+                            if (isNaN(srvIdx) || srvIdx < 0 || srvIdx >= epLinks.length) {
+                                return socket.sendMessage(sender, {
+                                    text: UI.error(`වැරදි අංකයක්!\n┃ 🎯 Use 1 - ${epLinks.length}`)
+                                }, { quoted: srvMek });
+                            }
+
+                            clearAllMfListeners();
+                            const selectedDl = epLinks[srvIdx];
+                            const srv = detectServer(selectedDl.name);
+                            const quality = selectedDl.quality || extractQuality(selectedDl.name) || 'HD';
+                            const size = selectedDl.size || 'N/A';
+                            const dlUrl = selectedDl.link;
+                            const sizeMB = parseSizeMB(size);
+
+                            await socket.sendMessage(sender, { react: { text: '📥', key: srvMek.key } });
+
+                            // ✈️ Telegram → Link only
+                            if (srv.type === 'telegram') {
+                                return socket.sendMessage(sender, {
+                                    text: `╭━━━〔 ✈️ *TELEGRAM LINK* 〕━━━╮\n┃\n┃ 🎬 *${cleanTitle.substring(0, 22)}*\n┃ 📺 *Episode:* ${selectedEpNum || 'Movie'}\n┃ 🎞 *Quality:* ${quality}\n┃ 📦 *Size:* ${size}\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n🔗 *Open Link :*\n${dlUrl}${FOOTER}`
+                                }, { quoted: srvMek });
+                            }
+
+                            // ⚠️ 2GB+ → Link only
+                            if (sizeMB > 2000) {
+                                return socket.sendMessage(sender, {
+                                    text: `╭━━━〔 ⚠️ *FILE TOO LARGE* 〕━━━╮\n┃\n┃ 🎬 *${cleanTitle.substring(0, 22)}*\n┃ 📺 *Episode:* ${selectedEpNum || 'Movie'}\n┃ 🎞 *Quality:* ${quality}\n┃ 📦 *Size:* ${size}\n┃ 🚫 *Limit:* 2GB\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n🔗 *Download Link :*\n${dlUrl}\n\n💡 _IDM එකෙන් download කරන්න_${FOOTER}`
+                                }, { quoted: srvMek });
+                            }
+
+                            // 📁⚡🚀 Direct → Download + Send
+                            await socket.sendMessage(sender, {
+                                text: UI.loading(`📥 Downloading from *${srv.name}*\n┃  🎞 ${quality}  ┃  📦 ${size}\n┃\n┃  _Please wait, this may take a while..._`)
+                            }, { quoted: srvMek });
+
+                            await fs.ensureDir(TEMP_DIR);
+                            const safeName = cleanTitle.replace(/[^a-zA-Z0-9 ]/g, '_').substring(0, 45);
+                            const localFile = path.join(TEMP_DIR, `${safeName}_Ep${selectedEpNum || 0}_${Date.now()}.mp4`);
+
+                            try {
+                                await downloadToServer(dlUrl, localFile);
+                                const stats = await fs.stat(localFile);
+                                const realSizeMB = stats.size / 1024 / 1024;
+
+                                if (realSizeMB < 1) {
+                                    await fs.remove(localFile).catch(() => {});
+                                    throw new Error('File too small (error page detected)');
+                                }
+
+                                await socket.sendMessage(sender, {
+                                    text: UI.success(`Downloaded! 📦 ${realSizeMB.toFixed(1)} MB\n┃  📤 _Sending to WhatsApp..._`)
+                                }, { quoted: srvMek });
+
+                                const fileName = `${safeName}_Ep${selectedEpNum || ''}_${quality}.mp4`;
+
+                                try {
+                                    await socket.sendMessage(sender, {
+                                        document: { url: localFile },
+                                        mimetype: 'video/mp4',
+                                        fileName: fileName,
+                                        caption: `╭━━━〔 ✅ *MFLIX DOWNLOAD* 〕━━━╮\n┃\n┃ 🎬 *${cleanTitle.substring(0, 22)}*\n┃ 📺 *Episode:* ${selectedEpNum || 'Movie'}\n┃ ${srv.icon} *Server:* ${srv.name}\n┃ 🎞 *Quality:* ${quality}\n┃ 📦 *Size:* ${realSizeMB.toFixed(1)} MB\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n> 🎬 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 🎬`
+                                    }, { quoted: srvMek });
+
+                                    await socket.sendMessage(sender, { react: { text: '✅', key: srvMek.key } });
+
+                                } catch (sendErr) {
+                                    await socket.sendMessage(sender, {
+                                        text: UI.error(`Send fail: ${sendErr.message.substring(0, 80)}\n\n🔗 *Direct Link:*\n${dlUrl}`)
+                                    }, { quoted: srvMek });
+                                }
+
+                                await fs.remove(localFile).catch(() => {});
+
+                            } catch (downloadErr) {
+                                console.error('[Mflix] download error:', downloadErr.message);
+                                await socket.sendMessage(sender, {
+                                    text: UI.error(`Download failed!\n┃  _${downloadErr.message.substring(0, 80)}_\n\n🔗 *Direct Link:*\n${dlUrl}`)
+                                }, { quoted: srvMek });
+                                try { await fs.remove(localFile); } catch {}
+                            }
+                        };
+
+                        mfServerListener = handleServer;
+                        socket.ev.on('messages.upsert', mfServerListener);
+                        if (mfMasterTimeout) clearTimeout(mfMasterTimeout);
+                        mfMasterTimeout = setTimeout(clearAllMfListeners, 600000);
+                    };
+
+                    mfEpisodeListener = handleEpisode;
+                    socket.ev.on('messages.upsert', mfEpisodeListener);
+
+                } catch (detailsErr) {
+                    clearAllMfListeners();
+                    await socket.sendMessage(sender, {
+                        text: UI.error(`Details fetch failed!\n┃  _${detailsErr.message.substring(0, 100)}_`)
+                    }, { quoted: replyMek });
+                }
+            }
+        };
+
+        mfSelectionListener = handleSelection;
+        socket.ev.on('messages.upsert', mfSelectionListener);
+
+    } catch (err) {
+        clearAllMfListeners();
+        await socket.sendMessage(sender, {
+            text: UI.error(`Search failed!\n┃  _${err.message.substring(0, 100)}_`)
         }, { quoted: msg });
     }
     break;
