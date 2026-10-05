@@ -4214,7 +4214,343 @@ ${SHAGGY_LINE}
     }
     break;
 }
+// ==========================================
+// 🎬 SHAGGYMOVIES - SHAGGY XMD
+// API: api.chamindu.site /movies/shaggymovies
+// ==========================================
+case 'shaggymovies':
+case 'smv':
+case 'shaggy': {
+    const FOOTER = `\n\n┗━━━━━━━━━━━━━━━━━━┛\n> 🎬 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 🎬`;
+    const API_BASE = 'https://api.chamindu.site/api/v1/movies/shaggymovies';
+    const CH_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+    const TEMP_DIR = './tmp_shaggymovies';
+    const MAX_FILE_BYTES = 1900 * 1024 * 1024; // 1.9GB WhatsApp document limit
 
+    if (!args.length) {
+        return await socket.sendMessage(sender, {
+            image: { url: pickBotImage(sessionConfig) },
+            caption: `╭━━━〔 🎬 *SHAGGYMOVIES* 〕━━━╮\n┃\n┃ 📌 *Usage :* .smv <movie name>\n┃\n┃ 💡 *Examples :*\n┃   .smv How to Train Your Dragon\n┃   .shaggy spider man\n┃\n┃ 🔍 _Sinhala Subtitles Movies_\n┃ 📥 _Direct MP4 download_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+        }, { quoted: msg });
+    }
+
+    const query = args.join(' ').trim();
+
+    let smvSelectionListener = null;
+    let smvQualityListener = null;
+    let smvMasterTimeout = null;
+
+    const clearAllSmvListeners = () => {
+        if (smvSelectionListener) { socket.ev.off('messages.upsert', smvSelectionListener); smvSelectionListener = null; }
+        if (smvQualityListener)   { socket.ev.off('messages.upsert', smvQualityListener);   smvQualityListener   = null; }
+        if (smvMasterTimeout)     { clearTimeout(smvMasterTimeout); smvMasterTimeout = null; }
+    };
+
+    const parseSizeMB = (s) => {
+        if (!s) return 0;
+        const m = String(s).toUpperCase().replace(/\s/g, '').match(/([\d.]+)(GB|MB|KB)/);
+        if (!m) return 0;
+        const v = parseFloat(m[1]);
+        const u = m[2];
+        if (u === 'GB') return v * 1024;
+        if (u === 'MB') return v;
+        return 0;
+    };
+
+    try {
+        // ═══ SEARCH ═══
+        await socket.sendMessage(sender, {
+            text: `╭━━━〔 ⏳ *SEARCHING* 〕━━━╮\n┃\n┃ 🔍 *Query :* ${query.substring(0, 30)}\n┃\n┃  _Please wait..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+        }, { quoted: msg });
+
+        const searchRes = await axios.get(`${API_BASE}/search`, {
+            params: { q: query, api_key: CH_KEY },
+            timeout: 60000,
+            validateStatus: () => true
+        });
+
+        const searchData = searchRes.data;
+        const results = searchData.data || [];
+
+        if (!searchData.status || results.length === 0) {
+            return await socket.sendMessage(sender, {
+                image: { url: pickBotImage(sessionConfig) },
+                caption: `╭━━━〔 ❌ *NO RESULTS* 〕━━━╮\n┃\n┃ 🔍 *Query :* ${query}\n┃ 😔 _කිසිදු movie එකක් හමු නොවීය_\n┃\n┃ 💡 _Spelling check කරන්න_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+            }, { quoted: msg });
+        }
+
+        const list = results.slice(0, 15);
+        let listText = `╭━━━〔 🎬 *SHAGGYMOVIES* 〕━━━╮\n┃\n`;
+        listText += `┃ 🔍 *Query :* ${query.substring(0, 30)}\n`;
+        listText += `┃ 📊 *Found :* ${list.length} / ${searchData.total || results.length}\n`;
+        listText += `┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n`;
+        listText += `*📌 Reply with the number 👇*\n\n`;
+
+        list.forEach((item, index) => {
+            const num = (index + 1) < 10 ? `0${index + 1}` : `${index + 1}`;
+            const typeIcon = item.type === 'tvshows' || item.type === 'series' ? '📺' : '🎥';
+            const rating = item.rating ? `⭐ ${item.rating}` : '⭐ N/A';
+            listText += `*${num}* ┃ ${typeIcon} *${item.title}*\n`;
+            listText += `      ┗━ ${rating}  ┃  📅 ${item.year || 'N/A'}\n\n`;
+        });
+
+        listText += `┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄${FOOTER}`;
+
+        const searchMsg = await socket.sendMessage(sender, {
+            image: { url: list[0].poster || list[0].image || pickBotImage(sessionConfig) },
+            caption: listText
+        }, { quoted: msg });
+
+        const searchMsgID = searchMsg.key.id;
+        smvMasterTimeout = setTimeout(clearAllSmvListeners, 180000);
+
+        // ═══ USER PICKS MOVIE ═══
+        const handleSelection = async ({ messages: replyMessages }) => {
+            const replyMek = replyMessages[0];
+            if (!replyMek?.message) return;
+
+            const messageType = replyMek.message.conversation || replyMek.message.extendedTextMessage?.text;
+            const isReplyToSentMsg = replyMek.message.extendedTextMessage?.contextInfo?.stanzaId === searchMsgID;
+
+            if (isReplyToSentMsg && sender === replyMek.key.remoteJid) {
+                const choice = parseInt(messageType) - 1;
+                if (isNaN(choice) || choice < 0 || choice >= list.length) {
+                    return socket.sendMessage(sender, {
+                        text: `╭━━━〔 ❌ *INVALID* 〕━━━╮\n┃\n┃  වැරදි අංකයක්!\n┃  🎯 Use 1 - ${list.length}\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                    }, { quoted: replyMek });
+                }
+
+                if (smvSelectionListener) { socket.ev.off('messages.upsert', smvSelectionListener); smvSelectionListener = null; }
+
+                const selectedItem = list[choice];
+
+                await socket.sendMessage(sender, {
+                    text: `╭━━━〔 ⏳ *FETCHING INFO* 〕━━━╮\n┃\n┃ 🎬 *${selectedItem.title.substring(0, 35)}*\n┃\n┃  _Please wait..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                }, { quoted: replyMek });
+
+                try {
+                    // ═══ INFO + DOWNLOAD LINKS ═══
+                    const infoRes = await axios.get(`${API_BASE}/infodl`, {
+                        params: { q: selectedItem.id, api_key: CH_KEY },
+                        timeout: 90000,
+                        validateStatus: () => true
+                    });
+
+                    const infoData = infoRes.data;
+                    if (!infoData.status || !infoData.data) {
+                        throw new Error('Details හමු නොවීය');
+                    }
+
+                    const movie = infoData.data;
+                    const downloads = movie.downloads || [];
+
+                    // ═══ INFO UI ═══
+                    let detailsText = `╭━━━〔 🎬 *MOVIE INFO* 〕━━━╮\n┃\n`;
+                    detailsText += `┃ 🎬 *${movie.title.substring(0, 28)}*\n`;
+                    if (movie.year) detailsText += `┃ 📅 *Year :* ${movie.year}\n`;
+                    if (movie.rating) detailsText += `┃ ⭐ *Rating :* ${movie.rating}\n`;
+                    if (movie.runtime) detailsText += `┃ ⏳ *Runtime :* ${movie.runtime}\n`;
+                    if (movie.director) detailsText += `┃ 🎬 *Director :* ${movie.director.substring(0, 30)}\n`;
+                    if (movie.country) detailsText += `┃ 🌍 *Country :* ${movie.country}\n`;
+                    if (movie.genres && movie.genres.length) detailsText += `┃ 🎭 *Genres :* ${movie.genres.slice(0, 3).join(', ')}\n`;
+                    if (movie.cast && movie.cast.length) detailsText += `┃ 👥 *Cast :* ${movie.cast.slice(0, 3).join(', ')}${movie.cast.length > 3 ? '...' : ''}\n`;
+                    detailsText += `┃ 📥 *Downloads :* ${downloads.length}\n`;
+                    detailsText += `┃\n╰━━━━━━━━━━━━━━━━━━╯`;
+
+                    if (movie.overview) {
+                        const desc = movie.overview.replace(/\s+/g, ' ').substring(0, 250);
+                        detailsText += `\n\n📖 *Story :*\n_${desc}..._`;
+                    }
+                    detailsText += FOOTER;
+
+                    await socket.sendMessage(sender, {
+                        image: { url: movie.poster || movie.image || selectedItem.poster || pickBotImage(sessionConfig) },
+                        caption: detailsText
+                    }, { quoted: replyMek });
+
+                    if (downloads.length === 0) {
+                        return socket.sendMessage(sender, {
+                            text: `╭━━━〔 ⚠️ *NO DOWNLOADS* 〕━━━╮\n┃\n┃ 🎬 *${movie.title.substring(0, 25)}*\n┃\n┃ 😔 _Direct download links හමු නොවීය_\n┃\n┃ 🔗 *Site :*\n┃ ${selectedItem.link || '#'}\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+                        }, { quoted: replyMek });
+                    }
+
+                    // ═══ DOWNLOAD OPTIONS UI ═══
+                    let dlText = `╭━━━〔 📥 *SELECT QUALITY* 〕━━━╮\n┃\n`;
+                    dlText += `┃ 🎬 *${movie.title.substring(0, 25)}*\n`;
+                    dlText += `┃ 📊 *${downloads.length} options*\n`;
+                    dlText += `┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n`;
+
+                    downloads.forEach((dl, i) => {
+                        const num = (i + 1) < 10 ? `0${i + 1}` : `${i + 1}`;
+                        const sizeMB = parseSizeMB(dl.size);
+                        const warn = sizeMB > 1900 ? ' ⚠️' : ' ✓';
+                        dlText += `*${num}* ┃ 🎞 *${dl.quality || 'HD'}*  ┃ 📦 ${dl.size || 'N/A'}${warn}\n`;
+                    });
+
+                    dlText += `\n┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n`;
+                    dlText += `*📌 Reply with number 👇*\n`;
+                    dlText += `_⚠️ = 1.9GB+ (Link only)_\n`;
+                    dlText += `_✓ = Direct MP4_`;
+                    dlText += FOOTER;
+
+                    const dlMsg = await socket.sendMessage(sender, { text: dlText }, { quoted: replyMek });
+                    const dlMsgID = dlMsg.key.id;
+
+                    // ═══ USER PICKS QUALITY ═══
+                    const handleQuality = async ({ messages: qMessages }) => {
+                        const qMek = qMessages[0];
+                        if (!qMek?.message || qMek.key.remoteJid !== sender) return;
+
+                        const qChoiceText = (qMek.message.conversation || qMek.message.extendedTextMessage?.text || '').trim();
+                        const isReplyToQ = qMek.message.extendedTextMessage?.contextInfo?.stanzaId === dlMsgID;
+
+                        if (!isReplyToQ) return;
+
+                        const qIdx = parseInt(qChoiceText) - 1;
+                        if (isNaN(qIdx) || qIdx < 0 || qIdx >= downloads.length) {
+                            return socket.sendMessage(sender, {
+                                text: `❌ වැරදි අංකයක්! Use 1 - ${downloads.length}`
+                            }, { quoted: qMek });
+                        }
+
+                        clearAllSmvListeners();
+                        const selected = downloads[qIdx];
+                        const dlUrl = selected.url;
+                        const quality = selected.quality || 'HD';
+                        const size = selected.size || 'N/A';
+                        const sizeMB = parseSizeMB(size);
+
+                        await socket.sendMessage(sender, { react: { text: '📥', key: qMek.key } });
+
+                        // ⚠️ Size > 1.9GB → link only
+                        if (sizeMB > 1900) {
+                            return socket.sendMessage(sender, {
+                                text: `╭━━━〔 ⚠️ *FILE TOO LARGE* 〕━━━╮\n┃\n┃ 🎬 *${movie.title.substring(0, 25)}*\n┃ 🎞 *Quality :* ${quality}\n┃ 📦 *Size :* ${size}\n┃ 🚫 *Limit :* 1.9 GB\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n*🔗 Download Link :*\n${dlUrl}\n\n💡 _IDM / Browser use කරන්න_${FOOTER}`
+                            }, { quoted: qMek });
+                        }
+
+                        // ═══ DOWNLOAD & SEND ═══
+                        await fs.ensureDir(TEMP_DIR);
+                        const safeName = movie.title.replace(/[^a-zA-Z0-9 ]/g, '_').substring(0, 50);
+                        const localFile = path.join(TEMP_DIR, `${safeName}_${quality}_${Date.now()}.mp4`);
+
+                        await socket.sendMessage(sender, {
+                            text: `╭━━━〔 📥 *DOWNLOADING* 〕━━━╮\n┃\n┃ 🎬 *${movie.title.substring(0, 25)}*\n┃ 🎞 *Quality :* ${quality}\n┃ 📦 *Size :* ${size}\n┃\n┃  _Server ekata download karanawa..._\n┃  _Please wait_\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                        }, { quoted: qMek });
+
+                        try {
+                            // ⚡ Download to server
+                            const dlRes = await axios({
+                                url: dlUrl,
+                                method: 'GET',
+                                responseType: 'stream',
+                                timeout: 0,
+                                maxRedirects: 10,
+                                maxContentLength: Infinity,
+                                maxBodyLength: Infinity,
+                                headers: {
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                                    'Accept': '*/*',
+                                    'Referer': 'https://movie.shaggytech.online/'
+                                },
+                                validateStatus: (s) => s >= 200 && s < 400
+                            });
+
+                            const ct = String(dlRes.headers['content-type'] || '').toLowerCase();
+                            if (ct.includes('text/html') || ct.includes('application/json')) {
+                                dlRes.data.destroy();
+                                throw new Error('Video file eka venuvata ' + ct + ' response ekak dunna');
+                            }
+
+                            const writer = fs.createWriteStream(localFile);
+                            dlRes.data.pipe(writer);
+
+                            await new Promise((resolve, reject) => {
+                                let stall;
+                                const arm = () => {
+                                    clearTimeout(stall);
+                                    stall = setTimeout(() => {
+                                        dlRes.data.destroy();
+                                        reject(new Error('Download stalled (90s no data)'));
+                                    }, 90000);
+                                };
+                                arm();
+                                dlRes.data.on('data', arm);
+                                dlRes.data.on('error', reject);
+                                writer.on('error', reject);
+                                writer.on('finish', () => { clearTimeout(stall); resolve(); });
+                            });
+
+                            const stats = await fs.stat(localFile);
+                            const realSizeMB = stats.size / 1024 / 1024;
+
+                            if (realSizeMB < 1) {
+                                await fs.remove(localFile).catch(() => {});
+                                throw new Error('File too small (error page)');
+                            }
+
+                            await socket.sendMessage(sender, {
+                                text: `╭━━━〔 ✅ *DOWNLOADED* 〕━━━╮\n┃ 📦 *Size :* ${realSizeMB.toFixed(1)} MB\n┃\n┃  📤 _Sending..._\n┃\n╰━━━━━━━━━━━━━━━━━━╯`
+                            }, { quoted: qMek });
+
+                            const fileName = `${safeName}_${quality}.mp4`;
+
+                            try {
+                                await socket.sendMessage(sender, {
+                                    document: { url: localFile },
+                                    mimetype: 'video/mp4',
+                                    fileName: fileName,
+                                    caption: `╭━━━〔 🎬 *SHAGGYMOVIES* 〕━━━╮\n┃\n┃ 🎬 *${movie.title.substring(0, 25)}*\n┃ 📅 *Year :* ${movie.year || 'N/A'}\n┃ 🎞 *Quality :* ${quality}\n┃ 📦 *Size :* ${size}\n┃\n╰━━━━━━━━━━━━━━━━━━╯\n\n> 🎬 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 🎬`
+                                }, { quoted: qMek });
+
+                                await socket.sendMessage(sender, { react: { text: '✅', key: qMek.key } });
+
+                            } catch (sendErr) {
+                                await socket.sendMessage(sender, {
+                                    text: `❌ Send fail: ${sendErr.message.substring(0, 80)}\n\n🔗 *Direct Link:*\n${dlUrl}${FOOTER}`
+                                }, { quoted: qMek });
+                            }
+
+                            await fs.remove(localFile).catch(() => {});
+
+                        } catch (dlErr) {
+                            console.error('[ShaggyMovies] download error:', dlErr.message);
+                            await socket.sendMessage(sender, {
+                                text: `╭━━━〔 ❌ *FAILED* 〕━━━╮\n┃  _${dlErr.message.substring(0, 80)}_\n┃\n┃ 🔗 *Direct Link:*\n┃ ${dlUrl}\n┃\n┃ 💡 _URL eka browser eken download karanna_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+                            }, { quoted: qMek });
+                            await socket.sendMessage(sender, { react: { text: '❌', key: qMek.key } });
+                            try { await fs.remove(localFile); } catch {}
+                        }
+                    };
+
+                    smvQualityListener = handleQuality;
+                    socket.ev.on('messages.upsert', smvQualityListener);
+                    if (smvMasterTimeout) clearTimeout(smvMasterTimeout);
+                    smvMasterTimeout = setTimeout(clearAllSmvListeners, 10 * 60 * 1000);
+
+                } catch (infoErr) {
+                    clearAllSmvListeners();
+                    console.error('[ShaggyMovies] info error:', infoErr.message);
+                    await socket.sendMessage(sender, {
+                        text: `╭━━━〔 ❌ *DETAILS FAILED* 〕━━━╮\n┃\n┃  _${infoErr.message.substring(0, 80)}_\n┃\n┃ 🔗 *Site :*\n┃ ${selectedItem.link || '#'}\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+                    }, { quoted: replyMek });
+                }
+            }
+        };
+
+        smvSelectionListener = handleSelection;
+        socket.ev.on('messages.upsert', smvSelectionListener);
+
+    } catch (err) {
+        clearAllSmvListeners();
+        console.error('[ShaggyMovies] search error:', err.message);
+        await socket.sendMessage(sender, { react: { text: '❌', key: msg.key } }).catch(() => {});
+        await socket.sendMessage(sender, {
+            text: `╭━━━〔 ❌ *SEARCH ERROR* 〕━━━╮\n┃\n┃  _${err.message.substring(0, 100)}_\n┃\n╰━━━━━━━━━━━━━━━━━━╯${FOOTER}`
+        }, { quoted: msg });
+    }
+    break;
+}
 case 'alive': {
     const upSec = process.uptime();
     const upStr = `${Math.floor(upSec / 3600)}h ${Math.floor((upSec % 3600) / 60)}m ${Math.floor(upSec % 60)}s`;
