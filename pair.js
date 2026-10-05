@@ -589,7 +589,7 @@ const config = {
     API_CINESUBZ_URL:'https://api-siteh-22e22e4cb068.herokuapp.com',
     API_MOVIE_URL: 'https://api-siteh-22e22e4cb068.herokuapp.com',
     API_KEY:'lakiya_2f3b6c382d1236ad7a08d56331fb679935d51dfc846df2c254093fd1fff9494e',
-    BOT_IMAGE:'https://files.catbox.moe/wogma6.jpeg',
+    BOT_IMAGE:'https://cloud.laksidu.site/stream/coNOXYjWqD/IMG-20260929-WA1350.jpg',   // kalin catbox.moe (down wenawa)
     BOT_FOOTER:"✦ 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 ✦",
     MGROUP_LINK: 'https://chat.whatsapp.com/EeMhcQufXDFABM1MnR05Wh?s=cl&p=a&mlu=4&ilr=4',
     MOVIE_FOOTER:"⏤͟͟͞͞★❮ SHAGGY XMD 〽️OVIE ⏤͟͟͞͞★",
@@ -1405,23 +1405,34 @@ async function fetchImageBuffer(url) {
     if (!/^image\//i.test(ct) || !r.data?.length) throw new Error('not an image');
     return Buffer.from(r.data);
 }
+// Poster/menu image URL ekak fetch wenne nathnam: ikmanata text-only fallback + eka 30 minutes ekakata "bad" kiyala mathaka thiyaganna
+const badImageUrls = new Map();
+const isBadImage = (u) => { const t = badImageUrls.get(u); if (!t) return false; if (Date.now() - t > 30 * 60 * 1000) { badImageUrls.delete(u); return false; } return true; };
 function installImageFallback(socket) {
     if (socket.__imgFallbackInstalled) return;
     socket.__imgFallbackInstalled = true;
     const prev = socket.sendMessage.bind(socket);
+    const FETCH_ERR = /fetch failed|Failed to fetch stream|status code|ENOTFOUND|ECONN|ETIMEDOUT|EAI_AGAIN|UND_ERR|socket hang up|aborted|certificate|terminated/i;
     socket.sendMessage = async (jid, content, options) => {
+        const url = content?.image?.url;
+        const remote = typeof url === 'string' && /^https?:\/\//i.test(url);
+        const textOnly = () => {
+            const text = content.caption || content.text || '';
+            return text ? prev(jid, { text }, options) : null;
+        };
+        if (remote && isBadImage(url)) { const r = await textOnly(); if (r) return r; }       // dead host => 20s wait nathuwa ikmanata
         try {
             return await prev(jid, content, options);
         } catch (e) {
-            const url = content?.image?.url;
-            if (!url || !/^https?:\/\//i.test(url) || !/Failed to fetch stream|status code|ENOTFOUND|ECONN|ETIMEDOUT|socket hang up|aborted/i.test(String(e?.message))) throw e;
-            console.error('[image] remote fetch failed, retrying via bot:', String(e.message).slice(0, 120));
+            if (!remote || !FETCH_ERR.test(String(e?.message))) throw e;
+            console.error('[image] remote fetch failed, retrying via bot:', String(e.message).slice(0, 120), '|', url);
             try {
                 return await prev(jid, { ...content, image: await fetchImageBuffer(url) }, options);
             } catch (_) {
-                const text = content.caption || content.text || '';
-                if (!text) throw e;
-                return await prev(jid, { text }, options);          // poster nathuwa text witharak yawanawa
+                badImageUrls.set(url, Date.now());
+                const r = await textOnly();
+                if (r) return r;                                   // poster nathuwa text witharak yawanawa
+                throw e;
             }
         }
     };
