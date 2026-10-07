@@ -595,7 +595,7 @@ const config = {
     MOVIE_FOOTER:"⏤͟͟͞͞★❮ SHAGGY XMD 〽️OVIE ⏤͟͟͞͞★",
     MOVIE_CAPTION:"🇸‌ʜᴀɢɢY-xᴍᴅ ᴍᴏᴠɪᴇ 🔥🌈",
     PREFIX: '.',
-    OWNER_NUMBERS: ['94784224161'],   // 🆕 ඔයාගේ number එක දාන්න
+    OWNER_NUMBERS: ['94785124161'],   // 🆕 ඔයාගේ number එක දාන්න
     BOT_NAME: "SHAGGY XMD",
     AIR_FOOTER: "ꜱʜᴀɢɢY-xᴍᴅ ᴠ2⚡",
     MODE: 'public',
