@@ -947,7 +947,7 @@ async function robustDownloadInner(url, dest, referer = '') {
 // 🌐 Third-party movie APIs: central config + auto retry
 //   .env eke  CHAMINDU_API_KEY=...  /  CHAMINDU_API_BASE=...  dala key/url eka wenas karanna puluwan
 // ==========================================
-const CH_KEY = process.env.CHAMINDU_API_KEY || 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+const CH_KEY = process.env.CHAMINDU_API_KEY || 'chama_api_096d233022977293f2555cf47077950d';
 const CH_BASE = process.env.CHAMINDU_API_BASE || 'https://api.chamindu.site';
 
 axios.defaults.headers.common['User-Agent'] = 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36';
@@ -4223,7 +4223,7 @@ case 'smv':
 case 'shaggy': {
     const FOOTER = `\n\n┗━━━━━━━━━━━━━━━━━━┛\n> 🎬 *𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗* 🎬`;
     const API_BASE = 'https://api.chamindu.site/api/v1/movies/shaggymovies';
-    const CH_KEY = 'chama_api_11230a80e5eed3c1b80bfcc5d1773ec9';
+    const CH_KEY = 'chama_api_096d233022977293f2555cf47077950d';
     const TEMP_DIR = './tmp_shaggymovies';
     const MAX_FILE_BYTES = 1900 * 1024 * 1024; // 1.9GB WhatsApp document limit
 
