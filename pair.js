@@ -2077,7 +2077,7 @@ async function shaggyUdDownload(socket, sender, quoted, udLink) {
 function formatMessage(title, content, footer) {
     const brand = toBold(String(config.BOT_NAME || 'SHAGGY XMD').toUpperCase());
     const ttl = toBold(String(title || '').replace(/\*/g, '').trim());
-    const head = `╭━━━〔 *${brand}* 〕━━━╮\n┃ ✦ *${ttl}*\n╰━━━━━━━━━━━━━━━━━━╯`;
+    const head = `┏━━━━━━━━━━━━━━━━━━━━┓\n┃  ✦ *${brand}* ✦\n┃  ➤ *${ttl}*\n┗━━━━━━━━━━━━━━━━━━━━┛`;
     const foot = footer ? `\n\n${SHAGGY_LINE}\n> ${footer}\n> _ᴘᴏᴡᴇʀᴇᴅ ʙʏ ꜱʜᴀɢɢʏ ᴛᴇᴄʜ_` : '';
     return `${head}\n\n${String(content || '').trim()}${foot}`;
 }
@@ -4076,33 +4076,34 @@ case 'help': {
         const total = Object.values(categories).reduce((n, c) => n + c.cmds.length, 0);
         const keycap = (k) => (String(k) === '10' ? '🔟' : `${k}\uFE0F\u20E3`);
         const catLines = Object.entries(categories)
-            .map(([k, c]) => `│ ${keycap(k)}  ${c.emoji} ${c.title}  ›  *${c.cmds.length}*`)
+            .map(([k, c]) => `┃ ${keycap(k)}  ${c.emoji} *${c.title}*  ⟪ ${c.cmds.length} ⟫`)
             .join('\n');
 
         const btnOn = () => sessionConfig.BUTTON_MODE === 'true' && buttonAllowed();
         const toggleKey = String(Object.keys(categories).length + 1);
         const buildMain = () =>
-`╭━━━━━━━━━━━━━━━━━━━━╮
-┃   ✦ *${botName}* ✦
-┃   _Multi-Device WhatsApp Bot_
-╰━━━━━━━━━━━━━━━━━━━━╯
+`┏━━━━━━━━━━━━━━━━━━━━┓
+┃  ✦ ━━ *${botName}* ━━ ✦
+┃  _Multi-Device WhatsApp Bot_
+┗━━━━━━━━━━━━━━━━━━━━┛
 
-👋 Hello *${pushName}*  ·  ${greet}
+👋 Hello *${pushName}*
+${greet}
 
-╭─「 📊 *SYSTEM* 」
-│ ⏰ Time     :  ${timeStr}
-│ 📆 Date     :  ${dateStr}
-│ ⚡ Uptime   :  ${upStr}
-│ 💾 RAM      :  ${ramMB} MB
-│ 🔣 Prefix   :  ${P}
-│ 🌐 Mode     :  ${sessionConfig.MODE || config.MODE}
-│ 🧩 Commands :  ${total}
-╰────────────────────
+┏━━━「 📊 *SYSTEM* 」━━━
+┃ ⏰  Time      ›  ${timeStr}
+┃ 📆  Date      ›  ${dateStr}
+┃ ⚡  Uptime    ›  ${upStr}
+┃ 💾  RAM       ›  ${ramMB} MB
+┃ 🔣  Prefix    ›  ${P}
+┃ 🌐  Mode      ›  ${sessionConfig.MODE || config.MODE}
+┃ 🧩  Commands  ›  ${total}
+┗━━━━━━━━━━━━━━━━━━━━
 
-╭─「 📂 *CATEGORIES* 」
+┏━━━「 📂 *CATEGORIES* 」━━━
 ${catLines}
-│ ${keycap(toggleKey)}  🔘 BUTTON MODE  ›  ${!buttonAllowed() ? '🔒 LOCKED' : btnOn() ? 'ON ✅' : 'OFF ❌'}
-╰────────────────────
+┃ ${keycap(toggleKey)}  🔘 *BUTTON MODE*  ⟪ ${!buttonAllowed() ? '🔒 LOCKED' : btnOn() ? 'ON ✅' : 'OFF ❌'} ⟫
+┗━━━━━━━━━━━━━━━━━━━━
 
 💬 _Reply with a number (1-${toggleKey})_
 
@@ -4110,13 +4111,13 @@ ${SHAGGY_LINE}
 > ${footer}`;
 
         const renderCategory = (c) => {
-            let out = `╭━━━〔 ${c.emoji} *${c.title}* 〕━━━╮\n┃ 📦 ${c.cmds.length} commands\n╰━━━━━━━━━━━━━━━━━━╯\n`;
+            let out = `┏━━━━━━━━━━━━━━━━━━━━┓\n┃  ${c.emoji}  *${c.title}*\n┃  ✦ ${c.cmds.length} commands available\n┗━━━━━━━━━━━━━━━━━━━━┛\n`;
             for (const [type, icon, label] of SECTIONS) {
                 const items = c.cmds.filter(x => x[0] === type);
                 if (!items.length) continue;
-                out += `\n╭─「 ${icon} *${label}* 」\n`;
-                out += items.map(([, cmd, desc]) => `│ ➤ *${P}${cmd}*\n│    ↳ _${desc}_`).join('\n');
-                out += `\n╰────────────────────\n`;
+                out += `\n┏━「 ${icon} *${label}* 」━━\n`;
+                out += items.map(([, cmd, desc]) => `┃ ✧ *${P}${cmd}*\n┃   └ _${desc}_`).join('\n');
+                out += `\n┗━━━━━━━━━━━━━━━━━━━━\n`;
             }
             return `${out}${c.note || ''}\n\n↩️ Reply *0* — back to main menu\n\n${SHAGGY_LINE}\n> ${footer}`;
         };
@@ -5178,6 +5179,8 @@ ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`
 
 case 'tvsend': {
     const DEFAULT_FOOTER = SHAGGY_FOOTER;
+    // Group ekata yana caption walata footer eka: .set MOVIE_FOOTER:text walin wenas karanna puluwan
+    const MOVIE_FOOT = `\n\n> ${sessionConfig.MOVIE_FOOTER || config.MOVIE_FOOTER}`;
 
     if (!isOwner) {
         await socket.sendMessage(sender, { text: '❌ *Owner witharai meka use karanna puluwan.*' }, { quoted: msg });
@@ -5283,7 +5286,7 @@ case 'tvsend': {
 
                         const tvInfo = tvShowData.data;
 
-                        let tvDetailsText = `╭━━━〔 *TV SERIES DETAILS* 〕━━━╮\n\n📺 *${tvInfo.title}*\n⭐ 𝗜ᴍᴅʙ ➜ ★ ${tvInfo.rating || 'N/A'}\n📅 𝗬ᴇᴀʀ ➜ ${tvInfo.year || 'N/A'}\n⏳ 𝗥ᴜɴᴛɪᴍᴇ ➜ ${tvInfo.duration || 'N/A'}\n🌍 𝗖ᴏᴜɴ𝘁𝗿ʏ ➜ ${tvInfo.country || 'N/A'}\n🎭 𝗚𝗲𝗻 genres ➜ ${tvInfo.genres ? tvInfo.genres.join(', ') : 'N/A'}\n🎬 𝗗ɪʀᴇᴄᴛᴏʀ ➜ ${tvInfo.directors || 'N/A'}\n⭐ 𝗦ᴛᴀʀ𝘀: ${tvInfo.stars || 'N/A'}\n📝 𝗦𝘁𝗼𝗿𝘆 ➜ ${tvInfo.story ? (tvInfo.story.length > 250 ? tvInfo.story.substring(0, 250) + '...' : tvInfo.story) : 'N/A'}\n🗿 𝗪ᴇʙ ➜ cinesubz.com\n ${DEFAULT_FOOTER}`;
+                        let tvDetailsText = `╭━━━〔 *TV SERIES DETAILS* 〕━━━╮\n\n📺 *${tvInfo.title}*\n⭐ 𝗜ᴍᴅʙ ➜ ★ ${tvInfo.rating || 'N/A'}\n📅 𝗬ᴇᴀʀ ➜ ${tvInfo.year || 'N/A'}\n⏳ 𝗥ᴜɴᴛɪᴍᴇ ➜ ${tvInfo.duration || 'N/A'}\n🌍 𝗖ᴏᴜɴ𝘁𝗿ʏ ➜ ${tvInfo.country || 'N/A'}\n🎭 𝗚𝗲𝗻 genres ➜ ${tvInfo.genres ? tvInfo.genres.join(', ') : 'N/A'}\n🎬 𝗗ɪʀᴇᴄᴛᴏʀ ➜ ${tvInfo.directors || 'N/A'}\n⭐ 𝗦ᴛᴀʀ𝘀: ${tvInfo.stars || 'N/A'}\n📝 𝗦𝘁𝗼𝗿𝘆 ➜ ${tvInfo.story ? (tvInfo.story.length > 250 ? tvInfo.story.substring(0, 250) + '...' : tvInfo.story) : 'N/A'}\n🗿 𝗪ᴇʙ ➜ cinesubz.com\n ${MOVIE_FOOT}`;
 
                         const posterUrl = tvInfo.image || selectedItem.image || DEFAULT_IMAGE;
                         await socket.sendMessage(sender, {
@@ -5323,7 +5326,7 @@ case 'tvsend': {
                                         document: { url: finalLinkObj.link },
                                         mimetype: 'video/mp4',
                                         fileName: `${tvInfo.title} - ${episode.episode_name}.mp4`,
-                                        caption: `*📺 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗠𝗢𝗩𝗜𝗘 𝗕𝗢𝗧 📺*\n\n🎭 *Title:* ${tvInfo.title}\n📌 *Episode:* ${episode.episode_name}\n📊 *Quality:* Direct MP4\n\n${DEFAULT_FOOTER}`
+                                        caption: `*📺 𝗦𝗛𝗔𝗚𝗚𝗬 𝗫𝗠𝗗 𝗠𝗢𝗩𝗜𝗘 𝗕𝗢𝗧 📺*\n\n🎭 *Title:* ${tvInfo.title}\n📌 *Episode:* ${episode.episode_name}\n📊 *Quality:* Direct MP4\n\n${MOVIE_FOOT}`
                                     });
 
                                     successCount++;
@@ -5377,7 +5380,7 @@ case 'tvsend': {
                             return;
                         }
 
-                        const movieDetailsText = `╭━━━〔 *MOVIE DETAILS* 〕━━━╮\n\n🎬 *${movieInfo.title}*\n⭐ 𝗜𝗠𝗗𝗕 ➜ ★ ${movieInfo.imdb || movieInfo.rating || 'N/A'}\n📅 𝗬𝗲𝗮𝗿 ➜ ${movieInfo.year || 'N/A'}\n⏳ 𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻 ➜ ${movieInfo.duration || 'N/A'}\n🌍 𝗖ᴏᴜɴ𝘁𝗿ʏ ➜ ${movieInfo.country || 'N/A'}\n🎭 𝗚𝗲𝗻 genres ➜ ${movieInfo.genres ? movieInfo.genres.join(', ') : 'N/A'}\n🏷️  ➜ ${movieInfo.language || movieInfo.tag || 'N/A'}\n🎬  ➜ ${movieInfo.directors || movieInfo.director || 'N/A'}\n⭐  ➜ ${movieInfo.stars || 'N/A'}\n📝  ➜ ${movieInfo.story ? (movieInfo.story.length > 250 ? movieInfo.story.substring(0, 250) + '...' : movieInfo.story) : 'N/A'}\n🗿 𝗪ᴇʙ ➜ cinesubz.com\n ${DEFAULT_FOOTER}`;
+                        const movieDetailsText = `╭━━━〔 *MOVIE DETAILS* 〕━━━╮\n\n🎬 *${movieInfo.title}*\n⭐ 𝗜𝗠𝗗𝗕 ➜ ★ ${movieInfo.imdb || movieInfo.rating || 'N/A'}\n📅 𝗬𝗲𝗮𝗿 ➜ ${movieInfo.year || 'N/A'}\n⏳ 𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻 ➜ ${movieInfo.duration || 'N/A'}\n🌍 𝗖ᴏᴜɴ𝘁𝗿ʏ ➜ ${movieInfo.country || 'N/A'}\n🎭 𝗚𝗲𝗻 genres ➜ ${movieInfo.genres ? movieInfo.genres.join(', ') : 'N/A'}\n🏷️  ➜ ${movieInfo.language || movieInfo.tag || 'N/A'}\n🎬  ➜ ${movieInfo.directors || movieInfo.director || 'N/A'}\n⭐  ➜ ${movieInfo.stars || 'N/A'}\n📝  ➜ ${movieInfo.story ? (movieInfo.story.length > 250 ? movieInfo.story.substring(0, 250) + '...' : movieInfo.story) : 'N/A'}\n🗿 𝗪ᴇʙ ➜ cinesubz.com\n ${MOVIE_FOOT}`;
 
                         const moviePosterUrl = movieInfo.image || selectedItem.image || DEFAULT_IMAGE;
                         await socket.sendMessage(sender, {
@@ -5423,7 +5426,7 @@ case 'tvsend': {
                                         document: { url: finalDirectLink },
                                         mimetype: 'video/mp4',
                                         fileName: `${movieInfo.title} - ${selectedDownload.quality}.mp4`,
-                                        caption: `*🎬 𝗦𝗛𝗔𝗚𝗚𝗬 𝗠𝗢𝗩𝗜𝗘 🎬*\n\n🎭 *Title:* ${movieInfo.title}\n🌟 *IMDB:* ${movieInfo.imdb || movieInfo.rating || 'N/A'}\n📅 *Year:* ${movieInfo.year || 'N/A'}\n📊 *Quality:* ${selectedDownload.quality}\n💾 *Size:* ${selectedDownload.size || 'N/A'}\n\n${DEFAULT_FOOTER}`
+                                        caption: `*🎬 𝗦𝗛𝗔𝗚𝗚𝗬 𝗠𝗢𝗩𝗜𝗘 🎬*\n\n🎭 *Title:* ${movieInfo.title}\n🌟 *IMDB:* ${movieInfo.imdb || movieInfo.rating || 'N/A'}\n📅 *Year:* ${movieInfo.year || 'N/A'}\n📊 *Quality:* ${selectedDownload.quality}\n💾 *Size:* ${selectedDownload.size || 'N/A'}\n\n${MOVIE_FOOT}`
                                     });
                                     await socket.sendMessage(sender, { text: `✅ *${movieInfo.title}* (${selectedDownload.quality}) group ekata yawwa!\n👥 ${targetGroupName}` }, { quoted: downloadMek });
 
@@ -14740,11 +14743,14 @@ case 'status': {
         const seconds = Math.floor(uptimeSeconds % 60);
         const uptimeFormatted = `${days}d ${hours}h ${minutes}m ${seconds}s`;
 
-        let systemText = `🖥️ *𝗦𝗛𝗔𝗚𝗚𝗬  𝗫𝗠𝗗  -  𝗦𝗬𝗦𝗧𝗘𝗠  𝗦𝗧𝗔𝗧𝗨𝗦* 📊\n\n` +
-            `⚡ *𝖲ᵵᵃᵗᵘˢ 𝖲ᵖᵉᵉᵈ :* \`${latency} ms\`\n` +
-            `⏳ *𝖴ᵖᵗⁱᵐᵉ :* \`${uptimeFormatted}\`\n` +
-            `🧠 *𝖱𝖠𝖬 𝖴𝗌𝖺𝗀𝖾 :* \`${formatBytes(usedMem)} / ${formatBytes(totalMem)}\`\n` +
-            `🌐 *𝖯𝖑ᵃᵗᶠᵒʳᵐ :* \`${os.platform()} (${os.arch})\`\n\n` +
+        const sysBrand = String(sessionConfig.BOT_NAME || config.BOT_NAME || 'SHAGGY XMD').toUpperCase();
+        let systemText = `┏━━━━━━━━━━━━━━━━━━━━┓\n┃  🖥️ *${sysBrand}*\n┃  ➤ *SYSTEM STATUS*\n┗━━━━━━━━━━━━━━━━━━━━┛\n\n` +
+            `┏━「 📊 *STATUS* 」━━\n` +
+            `┃ ⚡ *Speed*     ›  \`${latency} ms\`\n` +
+            `┃ ⏳ *Uptime*    ›  \`${uptimeFormatted}\`\n` +
+            `┃ 🧠 *RAM*       ›  \`${formatBytes(usedMem)} / ${formatBytes(totalMem)}\`\n` +
+            `┃ 🌐 *Platform*  ›  \`${os.platform()} (${os.arch()})\`\n` +
+            `┗━━━━━━━━━━━━━━━━━━━━\n\n` +
             `> ${sessionConfig.AIR_FOOTER || config.AIR_FOOTER}`;
 
         await socket.sendMessage(sender, { text: systemText }, { quoted: msg });
