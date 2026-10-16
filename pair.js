@@ -2193,7 +2193,6 @@ const contactNames = new Map();   // jid / number -> owner ge contacts eke save 
 const ecoBusy = new Set();
 const ecoQueue = new Map();       // reply denakota awilla thiyena latest message eka
 const ecoCount = new Map();       // chat ekakata ghanta ekata limits (replies / actions / movies)
-const ecoSeen = new Map();        // AI session ekata full instructions yawapu welawa
 const ecoMovieBusy = new Set();
 let ecoMovieActive = 0;
 
@@ -2253,55 +2252,169 @@ function ecoCatalogue() {
     return _ecoCat;
 }
 
-function ecoBuildPrompt({ name, ownerName, text, extra, full }) {
-    const who = name || 'the contact';
-    if (!full) return `[Reply with ONLY the JSON {"say":"...","action":...} as instructed] ${who}: ${text}`;
-    return `[ROLE] You are the personal AI assistant of ${ownerName}. ${ownerName} is away right now, so you chat on WhatsApp with their contact "${who}" on their behalf.
-[STYLE] Chat like a friendly, social person texting a friend: casual, warm, a bit playful. Mirror their language and slang (Sinhala, Singlish or English). Keep it short: 1-2 lines, at most 2 short messages separated by a blank line, max 1-2 emojis. ${name ? `Use the name "${name}" naturally, not every time.` : ''} Say once (early in the chat) that ${ownerName} is busy right now and you are their AI assistant. Never pretend to be human or to be ${ownerName}. Never promise or decide anything on ${ownerName}'s behalf, never share private info; if it is urgent or personal, say you will pass the message on. ${extra || ''}
-[ABILITIES - you can really do these] 1) chat. 2) send the bot menu. 3) run bot commands for them (songs, videos, downloads, tools, info). 4) find a movie on CineSubz and send the movie file automatically.
-[OUTPUT] Reply with ONLY one JSON object, no markdown: {"say":"<your chat message>","action":null}
-action can be:
-{"type":"menu"} - when they ask what you or the bot can do, ask for the menu, commands or features (also briefly list your abilities in "say").
-{"type":"movie","query":"<only the movie name>","quality":"<480p|720p|1080p or empty>"} - when they want a movie/film (e.g. "ravan film ekak one"). Tell them you are searching for it.
-{"type":"command","cmd":"<command> <args>"} - run one of these bot commands for them (no prefix in cmd):
-${ecoCatalogue().text}
-Use action null for normal chatting.
-[MESSAGE from ${who}] ${text}`;
+function ecoBuildPrompt({ name, ownerName, text, extra }) {
+    const who = name || 'friend';
+    return `You are ${ownerName}'s AI assistant. ${ownerName} is busy, so you are replying on WhatsApp to their contact "${who}". Write ONLY the message to send (no notes, no quotes, no explanations, no brackets).
+Rules: chat like a friendly person texting a friend: casual, warm, short (1-2 lines), max 1-2 emojis. Reply in the SAME style the contact writes: if they write Singlish (Sinhala words in English letters) or English, answer in Singlish/English using English letters; use Sinhala script ONLY if they do. Mention that ${ownerName} is busy and you are their AI assistant only once or when it fits. Never pretend to be human or ${ownerName}. You cannot make files or promises; if they want a movie, song or download, tell them to just say it (e.g. "avatar film ekak one", "song ekak one despacito"). If it is urgent, say you will pass the message on. ${extra || ''}
+Contact "${who}" says: ${text}`;
 }
 
-function ecoParse(raw) {
-    const t = String(raw || '').trim().replace(/^```(?:json)?\s*|\s*```$/gi, '').trim();
-    const a = t.indexOf('{'), b = t.lastIndexOf('}');
-    if (a !== -1 && b > a) {
-        try {
-            const o = JSON.parse(t.slice(a, b + 1));
-            if (o && typeof o === 'object') {
-                return { say: String(o.say || '').trim(), action: o.action && typeof o.action === 'object' ? o.action : null };
-            }
-        } catch { /* plain text reply */ }
-    }
-    return { say: t, action: null };
+// model eka leak karana notes / brackets / meta text ain karanawa
+function ecoClean(raw) {
+    let t = String(raw || '').replace(/^```[a-z]*\n?|```$/gi, '').trim();
+    t = t.split('\n').filter(l => !/^\s*(\[|\*\s{2,}|wait,|note:|\(or )/i.test(l)).join('\n').trim();
+    t = t.replace(/\s*\((?:or|i\.e\.)[^)]*\)/gi, '').replace(/^["“]+|["”]+$/g, '').trim();
+    return t.slice(0, 600);
 }
 
 async function aiEcoReply({ name, ownerName, text, session, extra }) {
-    const full = Date.now() - (ecoSeen.get(session) || 0) > 6 * 60 * 60 * 1000;
-    const prompt = ecoBuildPrompt({ name, ownerName, text, extra, full });
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 25000);
     try {
         const res = await fetch(CODEX_AI_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CODEX_AI_KEY}` },
-            body: JSON.stringify({ message: prompt, session }),
+            body: JSON.stringify({ message: ecoBuildPrompt({ name, ownerName, text, extra }), session }),
             signal: ctrl.signal
         });
         const data = await res.json();
-        const reply = String(data.reply || '').trim();
-        if (reply) ecoSeen.set(session, Date.now());
-        return reply;
+        return ecoClean(data.reply);
     } finally {
         clearTimeout(timer);
     }
+}
+
+// ---------- 🧭 Intent router (AI eken nathuwa, bot ma therum gannawa: fast + hari) ----------
+const ECO_STOP = new Set(('mata mta mama mn me oya oyaa oyage ape api eke eka ek ekak ekk eken ekata ekath ekakda ekada nama name kiyala kiyanna kiwwoth kiwwa kiyapan kiyan one oni ona onaa oney onee dennako denna dapan dapn danna dannako send karanna karan ewanna ewapan ewahan ewpn ewahn ewana ganna gnna download dl hoyala hoya hoyanna balanna balala balamu thiyenawada tiyenawada thiyeda tiyeda thiyanawada tiyanawada thiyenwada tiyenwada thiyenawa tiyenawa thiyanawa ahnn ko kohomada pls plz please bro machan mchn machang aiyo ane ow hari hri and the a an of my i want need can u you give gimme sinhala sub subs subtitle subtitles dubbed dub hd fhd sd bn bun wage thama thamai nm nam nattam naththam wenawa ewa eya meka mekath dunna dpn dapaw yawanna').split(' '));
+const ECO_WANT = /\b(one|oni|ona|onaa|oney|onee|dennako|denna|dapan|dapn|send|ewapan|ewanna|ewahan|ewpn|ewahn|ganna|gnna|download|dl|hoyala|hoya|hoyanna|thiyenawada|tiyenawada|thiyeda|tiyeda|thiyanawada|tiyanawada|want|need|give|gimme|dannako|danna|ekak|ekk)\b|ඕනේ|ඕන|දෙන්න|එවන්න/i;
+const ECO_MOVIE_W = /\b(film|films|filem|movie|movies|moive|muvie|mv|cinema)\b|ෆිල්ම්|චිත්‍රපට|මූවී/i;
+const ECO_MENU_W = /\b(menu|commands?|command list|features?|help|puluwan|mokada karanna|mokakda karanna|mokak karanna|what can you do|abilities)\b/i;
+const ECO_CMD_SYN = [
+    ['song', /\b(song|songs|gana|ganak|gaana|music|mp3|audio)\b/i],
+    ['yt', /\b(youtube|yt|ytmp4)\b/i],
+    ['tiktok', /\b(tiktok|tik tok)\b/i],
+    ['mediafire', /\bmediafire\b/i],
+    ['apk', /\bapk\b/i],
+    ['weather', /\b(weather|kalawa|climate)\b/i],
+    ['news', /\b(news|pawathi)\b/i]
+];
+function ecoLeftover(text, extraRe) {
+    return String(text).toLowerCase().replace(/https?:\/\/\S+/g, ' ').replace(extraRe || /$^/, ' ')
+        .replace(/\b(480|720|1080|2160)p?\b|\b4k\b/g, ' ')
+        .match(/[a-z0-9]+|[\u0D80-\u0DFF]+/g)?.filter(w => !ECO_STOP.has(w)) || [];
+}
+function ecoIntent(textRaw) {
+    const text = String(textRaw || '').trim();
+    if (!text || text.length > 300) return null;
+    const words = text.split(/\s+/).length;
+    const quality = (text.match(/\b(480|720|1080|2160)p?\b/i) || [])[1] || (/\b4k\b/i.test(text) ? '2160' : '');
+    const url = (text.match(/https?:\/\/\S+/) || [])[0] || '';
+    const names = ecoCatalogue().names;
+
+    if (ECO_MENU_W.test(text) && words <= 9) return { type: 'menu' };
+
+    if (ECO_MOVIE_W.test(text) && ECO_WANT.test(text)) {
+        const toks = ecoLeftover(text, ECO_MOVIE_W).filter(w => !ECO_MOVIE_W.test(w));
+        if (toks.length === 0) return { type: 'ask', what: 'film' };
+        if (toks.length <= 6) return { type: 'movie', query: toks.join(' '), quality };
+        return null;
+    }
+    for (const [cmd, re] of ECO_CMD_SYN) {
+        if (!names.has(cmd) || ECO_DENY.has(cmd) || !re.test(text)) continue;
+        const wantOk = ECO_WANT.test(text) || words <= 3 || (url && words <= 2);
+        if (!wantOk) continue;
+        if (['yt', 'tiktok', 'mediafire'].includes(cmd)) {
+            if (url) return { type: 'command', cmd: `${cmd} ${url}`.slice(0, 200) };
+            const toks = ecoLeftover(text, re);
+            if (cmd === 'yt' && toks.length) return { type: 'command', cmd: `yt ${toks.join(' ')}`, query: toks.join(' '), quality };
+            return { type: 'ask', what: cmd === 'yt' ? 'video' : 'link' };
+        }
+        if (cmd === 'weather' || cmd === 'news') return { type: 'command', cmd: `${cmd} ${ecoLeftover(text, re).join(' ')}`.trim() };
+        const toks = ecoLeftover(text, re);
+        if (!toks.length) return { type: 'ask', what: cmd === 'song' ? 'song' : cmd };
+        return { type: 'command', cmd: `${cmd} ${toks.join(' ')}`.slice(0, 200), query: toks.join(' '), quality };
+    }
+    return null;
+}
+function ecoIntentReply(it, name) {
+    const n = name ? ` ${name}` : '';
+    if (it.type === 'menu') return { say: `Mata puluwan${n}: 🎬 film hoyala yawanna (nama kiyanna), 🎵 song / youtube / tiktok download, 🌦️ weather, 📰 news wage dewal.\nBot menu eka yawannam 👇`, action: { type: 'menu' } };
+    if (it.type === 'ask') return { say: `Mona ${it.what} ekada ona${n}? Nama (nathnam link eka) kiyanna 🙂`, action: null };
+    if (it.type === 'movie') return { say: `Hari${n}, *${it.query}* hoyala yawannam, poddak inna 🎬`, action: it };
+    return { say: `Hari${n}, poddak inna 🙂`, action: it };
+}
+
+// ---------- 🧭 Auto navigator: bot eka yawana numbered list walata (movie list, quality list) auto reply karanawa ----------
+const ecoNav = new Map();   // jid -> { query, quality, until, steps, pushName }
+function ecoNavStart(jid, query, quality, pushName) {
+    if (!String(query || '').trim()) return;
+    ecoNav.set(jid, { query: String(query), quality: String(quality || ''), until: Date.now() + 4 * 60 * 1000, steps: 0, pushName });
+}
+function ecoParseList(txt) {
+    const items = [];
+    for (const line of String(txt).split('\n')) {
+        const m = line.match(/^[^\p{L}\p{N}\n]*?(\d{1,2})\s*(?:\uFE0F?\u20E3|║❯❯|[.):\]\-]|\s)\s*(.{2,})$/u);
+        if (m) items.push({ n: Number(m[1]), text: m[2].replace(/[*_`]/g, '').trim() });
+    }
+    const ok = items.length >= 2 && items[0].n === 1 && items.every((it, i) => it.n === i + 1);
+    return ok ? items : [];
+}
+function ecoScoreTitle(query, title) {
+    const key = cineNorm(query), t = cineNorm(title);
+    const tokens = String(query).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    if (t === key) return 100;
+    if (t.startsWith(key)) return 85;
+    if (t.includes(key)) return 70;
+    return tokens.length ? 60 * tokens.filter(w => t.includes(w)).length / tokens.length : 0;
+}
+function ecoPickFromList(items, nav) {
+    const isQ = items.filter(i => /\b(144|240|360|480|720|1080|2160)p?\b|\b4k\b/i.test(i.text)).length >= Math.max(2, Math.ceil(items.length / 2));
+    if (isQ) {
+        const pref = String(nav.quality || '').match(/\d{3,4}/)?.[0];
+        return (pref && items.find(i => i.text.includes(pref))) || items.find(i => /720/.test(i.text)) || items.find(i => /480/.test(i.text)) || items[0];
+    }
+    const ranked = items.map(i => {
+        const isTv = /tv\s*series|📺/i.test(i.text);
+        const title = i.text.replace(/^[^\p{L}\p{N}]*(?:movie|tv\s*series)\s*[|:\-]\s*/iu, '');   // 'Movie |' / 'TV Series |' prefix eka ain karanawa
+        return { i, sc: ecoScoreTitle(nav.query, title) - (isTv ? 5 : 0), len: title.length };
+    }).sort((x, y) => y.sc - x.sc || x.len - y.len);
+    return ranked[0].sc >= 40 ? ranked[0].i : null;   // hariyata ekak nathnam user ma therenawa
+}
+function ecoNavOnSend(socket, jid, content, res) {
+    const nav = ecoNav.get(jid);
+    if (!nav) return;
+    if (Date.now() > nav.until) { ecoNav.delete(jid); return; }
+    if (content?.document || content?.video || content?.audio) { ecoNav.delete(jid); return; }   // file eka giya -> iwarai
+    const txt = content?.caption || content?.text || '';
+    if (!res?.key?.id || !txt) return;
+    const items = ecoParseList(txt);
+    if (!items.length) return;
+    if (nav.steps >= 4) { ecoNav.delete(jid); return; }
+    const pick = ecoPickFromList(items, nav);
+    if (!pick) { ecoNav.delete(jid); return; }
+    nav.steps++;
+    const botJid = jidNormalizedUser(socket.user.id);
+    setTimeout(() => {
+        socket.ev.emit('messages.upsert', {
+            type: 'notify',
+            messages: [{
+                key: { remoteJid: jid, fromMe: false, id: 'ECO' + crypto.randomBytes(8).toString('hex').toUpperCase() },
+                message: { extendedTextMessage: { text: String(pick.n), contextInfo: { stanzaId: res.key.id, participant: botJid, quotedMessage: { conversation: '.' } } } },
+                pushName: nav.pushName,
+                messageTimestamp: Math.floor(Date.now() / 1000)
+            }]
+        });
+    }, 900);
+}
+function hookEcoNav(socket) {
+    if (socket.__ecoNavHooked) return;
+    socket.__ecoNavHooked = true;
+    const orig = socket.sendMessage.bind(socket);
+    socket.sendMessage = async (jid, content, opts) => {
+        const res = await orig(jid, content, opts);
+        try { ecoNavOnSend(socket, jid, content, res); } catch (e) { console.error('[AI ECO nav]', e.message); }
+        return res;
+    };
 }
 
 // 🎬 Movie name eken CineSubz search -> hodama match eka -> details -> quality select -> file eka yawanawa (full auto)
@@ -2370,6 +2483,7 @@ async function setupCommandHandlers(socket, number) {
     let sessionConfig = await loadUserConfig(sanitizedNumber);
     activeSockets.set(sanitizedNumber, { socket, config: sessionConfig });
     hookContactNames(socket);
+    hookEcoNav(socket);
 
     // 🔘 Button mode engine (BUTTON_MODE=true nam numbered lists buttons wenawa)
     // 🔒 Button mode: master (94784224161) + .add eken subscription dunna numbers walata witharai
@@ -2680,7 +2794,7 @@ async function setupCommandHandlers(socket, number) {
                     if (!act || typeof act !== 'object') return;
                     if (c.a >= 8) return;                                   // ghanta ekakata actions 8k
                     if (act.type === 'menu') { c.a++; ecoDispatch('menu'); }
-                    else if (act.type === 'command') { if (ecoDispatch(act.cmd)) c.a++; }
+                    else if (act.type === 'command') { if (ecoDispatch(act.cmd)) { c.a++; ecoNavStart(from, act.query, act.quality, msg.pushName); } }
                     else if (act.type === 'movie') {
                         const q = String(act.query || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 80);
                         if (!q) return;
@@ -2713,14 +2827,19 @@ async function setupCommandHandlers(socket, number) {
                             c.n++; ecoCount.set(ecoKey, c);
 
                             socket.sendPresenceUpdate('composing', from).catch(() => {});
-                            const raw = await aiEcoReply({
-                                name: ecoName, ownerName, text: cur,
-                                session: `eco:${sanitizedNumber}:${from}`,
-                                extra: sessionConfig.AI_ECO_PROMPT || ''
-                            });
-                            if (!raw) throw new Error('empty reply');
-                            const out = ecoParse(raw);
-                            if (!out.say && !out.action) throw new Error('empty reply');
+                            const intent = ecoIntent(cur);
+                            let out;
+                            if (intent) {
+                                out = ecoIntentReply(intent, ecoName);       // menu / movie / command: AI eka nathuwa, bot ma therum gannawa
+                            } else {
+                                const raw = await aiEcoReply({
+                                    name: ecoName, ownerName, text: cur,
+                                    session: `eco:${sanitizedNumber}:${from}`,
+                                    extra: sessionConfig.AI_ECO_PROMPT || ''
+                                });
+                                if (!raw) throw new Error('empty reply');
+                                out = { say: raw, action: null };
+                            }
                             for (const part of out.say.split(/\n{2,}/).map(x => x.trim()).filter(Boolean).slice(0, 3)) await ecoSay(part);
                             socket.sendPresenceUpdate('paused', from).catch(() => {});
                             ecoAct(c, out.action);
