@@ -212,6 +212,7 @@ axios.interceptors.response.use(undefined, async (err) => {
 
 // 🧩 Baileys engine: chama-bailez-pro (stock @whiskeysockets/baileys wenuwata)
 import * as BaileysNS from 'chama-bailez-pro';
+import { installBugShield, installProcessGuards } from './antibug.js';   // 🛡️ bug shield
 const BAILEYS_ACTIVE = 'chama-bailez-pro';
 console.log(`🧩 Baileys engine: ${BAILEYS_ACTIVE}`);
 const makeWASocket = BaileysNS.default?.default || BaileysNS.default || BaileysNS.makeWASocket;
@@ -601,6 +602,9 @@ const config = {
     MODE: 'public',
     MAX_RETRIES: 3,
     ANTI_CALL: 'false',   // call awoth auto reject
+    ANTI_BUG: 'true',        // 🛡️ bug/crash messages auto delete (.set ANTI_BUG:off)
+    ANTI_BUG_BLOCK: 'true',  // bug yawana inbox sender auto block
+    ANTI_BUG_NOTIFY: 'true', // bug block kalama owner ta notice
     ANTI_LINK: 'off',     // off | delete | kick (groups)
     WELCOME: 'false',     // group welcome / goodbye
     WELCOME_MSG: '',
@@ -18246,9 +18250,9 @@ case 'setting': {
         'PREFIX', 'AUTO_RECORDING', 'AUTO_TYPING', 'MODE', 'JID',
         'ALWAYS_ONLINE', 'ALWAYS_MSG_SEEN', 'STATUS_VIEW', 'AUTO_LIKE',
         'ANTI_DELETE', 'BUTTON_MODE', 'MOVIE_FOOTER', 'MOVIE_CAPTION', 'BOT_NAME', 'BOT_IMAGE', 'BOT_FOOTER', 'AIR_FOOTER', 'CSONG_AUDIO',
-        'ANTI_CALL', 'ANTI_LINK', 'WELCOME', 'WELCOME_MSG', 'AWAY', 'AWAY_MSG', 'COOLDOWN', 'AI_ECO', 'AI_ECO_PROMPT'
+        'ANTI_CALL', 'ANTI_LINK', 'WELCOME', 'WELCOME_MSG', 'AWAY', 'AWAY_MSG', 'COOLDOWN', 'AI_ECO', 'AI_ECO_PROMPT', 'ANTI_BUG', 'ANTI_BUG_BLOCK', 'ANTI_BUG_NOTIFY'
     ];
-    const BOOL_KEYS = ['AUTO_RECORDING', 'AUTO_TYPING', 'ALWAYS_ONLINE', 'ALWAYS_MSG_SEEN', 'STATUS_VIEW', 'AUTO_LIKE', 'ANTI_DELETE', 'BUTTON_MODE', 'ANTI_CALL', 'WELCOME', 'AWAY', 'AI_ECO'];
+    const BOOL_KEYS = ['AUTO_RECORDING', 'AUTO_TYPING', 'ALWAYS_ONLINE', 'ALWAYS_MSG_SEEN', 'STATUS_VIEW', 'AUTO_LIKE', 'ANTI_DELETE', 'BUTTON_MODE', 'ANTI_CALL', 'WELCOME', 'AWAY', 'AI_ECO', 'ANTI_BUG', 'ANTI_BUG_BLOCK', 'ANTI_BUG_NOTIFY'];
     const GLOBAL_KEYS = ['MAINTENANCE', 'MAINTENANCE_MSG', 'FREE_LIMIT', 'MAX_DL', 'MIN_DISK_GB', 'DL_CONN'];
     const parseBool = (x) => {
         const lv = String(x).toLowerCase();
@@ -18282,6 +18286,8 @@ ${on('AUTO_LIKE')} AUTO_LIKE
 
 🛡 *Protection*
 ${on('ANTI_DELETE')} ANTI_DELETE
+${on('ANTI_BUG')} ANTI_BUG  (crash/bug shield)
+${on('ANTI_BUG_BLOCK')} ANTI_BUG_BLOCK  (auto block sender)
 ${on('ANTI_CALL')} ANTI_CALL  (voice: ${hasCallVoice ? 'set' : 'not set - .callvoice'})
 🔗 ANTI_LINK: ${v('ANTI_LINK') || 'off'}
 ⏱ COOLDOWN: ${v('COOLDOWN')}s
@@ -18310,7 +18316,7 @@ ${runtimeState.maintenance ? '✅' : '❌'} MAINTENANCE  (${short(runtimeState.m
 \`${P3}set AWAY:on, AWAY_MSG:Mama busy, passe reply\`
 \`${P3}set PREFIX:!, MODE:private\`
 
-*on/off:* ALWAYS_ONLINE, ALWAYS_MSG_SEEN, AUTO_TYPING, AUTO_RECORDING, STATUS_VIEW, AUTO_LIKE, ANTI_DELETE, ANTI_CALL, WELCOME, AWAY, BUTTON_MODE
+*on/off:* ALWAYS_ONLINE, ALWAYS_MSG_SEEN, AUTO_TYPING, AUTO_RECORDING, STATUS_VIEW, AUTO_LIKE, ANTI_DELETE, ANTI_CALL, ANTI_BUG, ANTI_BUG_BLOCK, WELCOME, AWAY, BUTTON_MODE
 *ANTI_LINK:* off / delete / kick _(bot group admin wenna one)_
 *COOLDOWN:* 0-30 (seconds, 0 = off)
 *MODE:* public / private / inbox / groups
@@ -18645,6 +18651,25 @@ async function EmpirePair(number, res) {
             browser: Browsers.macOS('Safari'),
         });
 
+        // 🛡️ BUG SHIELD: handlers attach wenna *kalin* install karanna oni
+        installBugShield(socket, {
+            number: sanitizedNumber,
+            ownerNumbers: config.OWNER_NUMBERS || [],
+            getOptions: () => {
+                const c = activeSockets.get(sanitizedNumber)?.config || {};
+                return {
+                    enabled: c.ANTI_BUG !== 'false',
+                    autoBlock: c.ANTI_BUG_BLOCK !== 'false',
+                    notify: c.ANTI_BUG_NOTIFY !== 'false',
+                    blockInteractive: true
+                };
+            },
+            canRevoke: async (gjid) => {
+                const gm = await getGroupMetaCached(socket, gjid);
+                return groupAdminSet(gm).has(jidNormalizedUser(socket.user.id));
+            }
+        });
+
         socketCreationTime.set(sanitizedNumber, Date.now());
         setupCommandHandlers(socket, sanitizedNumber);
         setupAutoReply(socket, sanitizedNumber);
@@ -18834,9 +18859,8 @@ process.on('exit', () => {
     fs.emptyDirSync(SESSION_BASE_PATH);
 });
 
-process.on('uncaughtException', (err) => {
-    console.error('Uncaught exception:', err);
-    exec(`pm2 restart ${process.env.PM2_NAME || '{test-{md-{mini-{bot-session'}`);
-});
+// 🛡️ Crash walin process eka restart wenna epa: unhandledRejection / uncaughtException log witharai,
+// 30s athule 5k+ unoth witharak pm2 restart karanawa (bug payload eken crash-loop wenna ba)
+installProcessGuards(() => exec(`pm2 restart ${process.env.PM2_NAME || '{test-{md-{mini-{bot-session'}`));
 
 export default router;
