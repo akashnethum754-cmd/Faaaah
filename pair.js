@@ -608,6 +608,7 @@ const config = {
     AWAY_MSG: '',
     AI_ECO: 'false',      // inbox ekata AI chat (.aieco on/off)
     AI_ECO_PROMPT: '',    // AI ekata extra instructions (optional)
+    AI_ECO_LANG: 'si',    // si = Sinhala (default) | singlish   (.aieco lang si|singlish)
     COOLDOWN: '2.5',      // seconds, command spam guard (0 = off)
     FREE_DAILY_LIMIT: 4   // free bot: dawasata movie (video file) 4k, hama command ekkama ekathuwa
 };
@@ -2192,6 +2193,7 @@ const CODEX_AI_KEY = process.env.CODEX_API_KEY || 'cx_live_555l2y4l5a5t0y5z1x5a1
 const contactNames = new Map();   // jid / number -> owner ge contacts eke save karapu nama
 const ecoBusy = new Set();
 const ecoQueue = new Map();       // reply denakota awilla thiyena latest message eka
+const ecoPending = new Map();     // bot ahapu prashnayata (film / song nama) uththara balaporoththuwen
 const ecoCount = new Map();       // chat ekakata ghanta ekata limits (replies / actions / movies)
 
 function hookContactNames(socket) {
@@ -2250,10 +2252,10 @@ function ecoCatalogue() {
     return _ecoCat;
 }
 
-function ecoBuildPrompt({ name, ownerName, text, extra }) {
+function ecoBuildPrompt({ name, ownerName, text, extra, lang }) {
     const who = name || 'friend';
     return `You are ${ownerName}'s AI assistant. ${ownerName} is busy, so you are replying on WhatsApp to their contact "${who}". Write ONLY the message to send (no notes, no quotes, no explanations, no brackets).
-Rules: chat like a friendly person texting a friend: casual, warm, short (1-2 lines), max 1-2 emojis. Reply in the SAME style the contact writes: if they write Singlish (Sinhala words in English letters) or English, answer in Singlish/English using English letters; use Sinhala script ONLY if they do. Mention that ${ownerName} is busy and you are their AI assistant only once or when it fits. Never pretend to be human or ${ownerName}. You cannot make files or promises; if they want a movie, song or download, tell them to just say it (e.g. "avatar film ekak one", "song ekak one despacito"). If it is urgent, say you will pass the message on. ${extra || ''}
+Rules: chat like a friendly person texting a friend: casual, warm, short (1-2 lines), max 1-2 emojis. ${lang === 'singlish' ? 'Reply in Singlish (Sinhala words written in English letters), even if they write Sinhala script.' : 'ALWAYS reply in natural, spoken Sinhala using Sinhala script, no matter how the contact writes (Singlish, English or Sinhala). Keep words like busy, AI assistant, movie names and song names in English.'} Mention that ${ownerName} is busy and you are their AI assistant only once or when it fits. Never pretend to be human or ${ownerName}. You cannot make files or promises; if they want a movie, song or download, tell them to just say it (e.g. "avatar film ekak one", "song ekak one despacito"). If it is urgent, say you will pass the message on. ${extra || ''}
 Contact "${who}" says: ${text}`;
 }
 
@@ -2265,14 +2267,14 @@ function ecoClean(raw) {
     return t.slice(0, 600);
 }
 
-async function aiEcoReply({ name, ownerName, text, session, extra }) {
+async function aiEcoReply({ name, ownerName, text, session, extra, lang }) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 25000);
     try {
         const res = await fetch(CODEX_AI_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CODEX_AI_KEY}` },
-            body: JSON.stringify({ message: ecoBuildPrompt({ name, ownerName, text, extra }), session }),
+            body: JSON.stringify({ message: ecoBuildPrompt({ name, ownerName, text, extra, lang }), session }),
             signal: ctrl.signal
         });
         const data = await res.json();
@@ -2313,7 +2315,7 @@ function ecoIntent(textRaw) {
 
     if (ECO_MOVIE_W.test(text) && ECO_WANT.test(text)) {
         const toks = ecoLeftover(text, ECO_MOVIE_W).filter(w => !ECO_MOVIE_W.test(w) && w !== '1');   // 'avatar 1' -> avatar
-        if (toks.length === 0) return { type: 'ask', what: 'film' };
+        if (toks.length === 0) return { type: 'ask', what: 'film', kind: 'movie' };
         if (toks.length <= 6) return { type: 'movie', query: toks.join(' '), quality };
         return null;
     }
@@ -2325,28 +2327,49 @@ function ecoIntent(textRaw) {
             if (url) return { type: 'command', cmd: `${cmd} ${url}`.slice(0, 200) };
             const toks = ecoLeftover(text, re);
             if (cmd === 'yt' && toks.length) return { type: 'command', cmd: `yt ${toks.join(' ')}`, query: toks.join(' '), quality };
-            return { type: 'ask', what: cmd === 'yt' ? 'video' : 'link' };
+            return { type: 'ask', what: cmd === 'yt' ? 'video' : 'link', kind: 'cmd', cmd };
         }
         if (cmd === 'weather' || cmd === 'news') return { type: 'command', cmd: `${cmd} ${ecoLeftover(text, re).join(' ')}`.trim() };
         const toks = ecoLeftover(text, re);
-        if (!toks.length) return { type: 'ask', what: cmd === 'song' ? 'song' : cmd };
+        if (!toks.length) return { type: 'ask', what: cmd === 'song' ? 'song' : cmd, kind: 'cmd', cmd };
         return { type: 'command', cmd: `${cmd} ${toks.join(' ')}`.slice(0, 200), query: toks.join(' '), quality };
     }
     return null;
 }
-function ecoIntentReply(it, name) {
+function ecoIntentReply(it, name, lang) {
     const n = name ? ` ${name}` : '';
-    if (it.type === 'menu') return { say: `Mata puluwan${n}: 🎬 film hoyala yawanna (nama kiyanna), 🎵 song / youtube / tiktok download, 🌦️ weather, 📰 news wage dewal.\nBot menu eka yawannam 👇`, action: { type: 'menu' } };
-    if (it.type === 'ask') return { say: `Mona ${it.what} ekada ona${n}? Nama (nathnam link eka) kiyanna 🙂`, action: null };
-    if (it.type === 'movie') return { say: `Hari${n}, *${it.query}* hoyala yawannam, poddak inna 🎬`, action: it };
-    return { say: `Hari${n}, poddak inna 🙂`, action: it };
+    const si = lang !== 'singlish';
+    if (it.type === 'menu') return { say: si
+        ? `මට පුළුවන්${n}: 🎬 ෆිල්ම් එකක් හොයලා එවන්න (නම කියන්න), 🎵 සිංදු / YouTube / TikTok download, 🌦️ කාලගුණය, 📰 පුවත් වගේ දේවල්.\nබොට් මෙනු එක එවන්නම් 👇`
+        : `Mata puluwan${n}: 🎬 film hoyala yawanna (nama kiyanna), 🎵 song / youtube / tiktok download, 🌦️ weather, 📰 news wage dewal.\nBot menu eka yawannam 👇`, action: { type: 'menu' } };
+    if (it.type === 'ask') {
+        const si_what = { film: 'ෆිල්ම් එක', song: 'සිංදුව', video: 'වීඩියෝ එක', link: 'ලින්ක් එක' }[it.what];
+        return { say: si
+            ? (it.what === 'link' ? `ලින්ක් එක එවන්න${n} 🔗` : `මොන ${si_what || 'දේ'}ද ඕනේ${n}? නම${it.what === 'film' || it.what === 'video' ? ' (නැත්නම් ලින්ක් එක)' : ''} කියන්න 🙂`)
+            : `Mona ${it.what} ekada ona${n}? Nama (nathnam link eka) kiyanna 🙂`, action: null };
+    }
+    if (it.type === 'movie') return { say: si ? `හරි${n}, *${it.query}* හොයලා එවන්නම්, පොඩ්ඩක් ඉන්න 🎬` : `Hari${n}, *${it.query}* hoyala yawannam, poddak inna 🎬`, action: it };
+    return { say: si ? `හරි${n}, පොඩ්ඩක් ඉන්න 🙂` : `Hari${n}, poddak inna 🙂`, action: it };
+}
+
+// bot ahapu prashnayata (eg: "Mona film ekada?") ena uththara eka -> command ekak widihata
+function ecoFollowUp(p, text) {
+    const t = String(text || '').trim();
+    if (!t || t.length > 200) return null;
+    const quality = (t.match(/\b(480|720|1080|2160)p?\b/i) || [])[1] || '';
+    const url = (t.match(/https?:\/\/\S+/) || [])[0] || '';
+    if (p.kind === 'cmd' && ['tiktok', 'mediafire', 'yt'].includes(p.cmd) && url) return { type: 'command', cmd: `${p.cmd} ${url}`.slice(0, 200) };
+    const toks = ecoLeftover(t).filter(w => p.kind !== 'movie' || w !== '1');
+    if (!toks.length || toks.length > 4 || /\?/.test(t)) return null;   // loku sentence / prashna -> normal chat ekak
+    if (p.kind === 'movie') return { type: 'movie', query: toks.join(' '), quality };
+    return { type: 'command', cmd: `${p.cmd} ${toks.join(' ')}`.slice(0, 200), query: toks.join(' '), quality };
 }
 
 // ---------- 🧭 Auto navigator: bot eka yawana numbered list walata (movie list, quality list) auto reply karanawa ----------
 const ecoNav = new Map();   // jid -> { query, quality, until, steps, pushName }
-function ecoNavStart(jid, query, quality, pushName) {
+function ecoNavStart(jid, query, quality, pushName, lang) {
     if (!String(query || '').trim()) return;
-    ecoNav.set(jid, { query: String(query), quality: String(quality || ''), until: Date.now() + 4 * 60 * 1000, steps: 0, pushName });
+    ecoNav.set(jid, { query: String(query), quality: String(quality || ''), until: Date.now() + 4 * 60 * 1000, steps: 0, pushName, lang });
 }
 function ecoParseList(txt) {
     const items = [];
@@ -2394,7 +2417,7 @@ function ecoNavOnSend(socket, jid, content, res) {
     const pick = ecoPickFromList(items, nav);
     if (!pick) {
         ecoNav.delete(jid);
-        socket.sendMessage(jid, { text: 'Hariyatama match wena ekak therunne na 🤔 Udin thiyena list eken oyata one ekata adala *number eka* reply karanna.' }).catch(() => {});
+        socket.sendMessage(jid, { text: nav.lang === 'singlish' ? 'Hariyatama match wena ekak therunne na 🤔 Udin thiyena list eken oyata one ekata adala *number eka* reply karanna.' : 'හරියටම ගැලපෙන එකක් තෝරගන්න බැරි වුණා 🤔 උඩ තියෙන ලිස්ට් එකෙන් ඔයාට ඕනේ එකේ *අංකය* රිප්ලයි කරන්න.' }).catch(() => {});
         return;
     }
     nav.steps++;
@@ -2713,6 +2736,7 @@ async function setupCommandHandlers(socket, number) {
                 const ecoName = ecoContactName(from, msg.pushName);
                 const ownerName = String(sessionConfig.BOT_OWNER_NAME || socket.user?.name || 'the owner').replace(/[\r\n]/g, ' ').slice(0, 40);
                 const ecoPrefix = sessionConfig.PREFIX || config.PREFIX || '.';
+                const ecoLang = sessionConfig.AI_ECO_LANG === 'singlish' ? 'singlish' : 'si';
                 const ecoSay = async (t) => {
                     await socket.sendPresenceUpdate('composing', from).catch(() => {});
                     await new Promise(r => setTimeout(r, Math.min(1200, 250 + t.length * 8)));
@@ -2738,16 +2762,16 @@ async function setupCommandHandlers(socket, number) {
                     if (!act || typeof act !== 'object') return;
                     if (c.a >= 8) return;                                   // ghanta ekakata actions 8k
                     if (act.type === 'menu') { c.a++; ecoDispatch('menu'); }
-                    else if (act.type === 'command') { if (ecoDispatch(act.cmd)) { c.a++; ecoNavStart(from, act.query, act.quality, msg.pushName); } }
+                    else if (act.type === 'command') { if (ecoDispatch(act.cmd)) { c.a++; ecoNavStart(from, act.query, act.quality, msg.pushName, ecoLang); } }
                     else if (act.type === 'movie') {
                         const q = String(act.query || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 80);
                         if (!q) return;
                         if (c.m >= 3) {
-                            ecoSay('Movie godak illuwa, poddak inna iwara una gaman ayeth kiyanna 🙂').catch(() => {});
+                            ecoSay(ecoLang === 'si' ? 'ෆිල්ම් ගොඩක් ඉල්ලුවා, ටිකක් ඉන්න ඒවා ඉවර වුණාම ආයෙ කියන්න 🙂' : 'Movie godak illuwa, poddak inna iwara una gaman ayeth kiyanna 🙂').catch(() => {});
                             return;
                         }
                         // .cinesubz command eke case eka thamai run wenne: search -> select -> quality -> mp4 (steps auto)
-                        if (ecoDispatch(`cinesubz ${q}`)) { c.a++; c.m++; ecoNavStart(from, q, act.quality, msg.pushName); }
+                        if (ecoDispatch(`cinesubz ${q}`)) { c.a++; c.m++; ecoNavStart(from, q, act.quality, msg.pushName, ecoLang); }
                     }
                 };
                 (async () => {
@@ -2760,15 +2784,20 @@ async function setupCommandHandlers(socket, number) {
                             c.n++; ecoCount.set(ecoKey, c);
 
                             socket.sendPresenceUpdate('composing', from).catch(() => {});
-                            const intent = ecoIntent(cur);
+                            let intent = ecoIntent(cur);
+                            const pend = ecoPending.get(ecoKey);
+                            if (!intent && pend && Date.now() < pend.until) intent = ecoFollowUp(pend, cur);   // "Avatar" / "Saritha" wage uththara
+                            ecoPending.delete(ecoKey);
+                            if (intent && intent.type === 'ask') ecoPending.set(ecoKey, { ...intent, until: Date.now() + 3 * 60 * 1000 });
                             let out;
                             if (intent) {
-                                out = ecoIntentReply(intent, ecoName);       // menu / movie / command: AI eka nathuwa, bot ma therum gannawa
+                                out = ecoIntentReply(intent, ecoName, ecoLang);       // menu / movie / command: AI eka nathuwa, bot ma therum gannawa
                             } else {
                                 const raw = await aiEcoReply({
                                     name: ecoName, ownerName, text: cur,
                                     session: `eco:${sanitizedNumber}:${from}`,
-                                    extra: sessionConfig.AI_ECO_PROMPT || ''
+                                    extra: sessionConfig.AI_ECO_PROMPT || '',
+                                    lang: ecoLang
                                 });
                                 if (!raw) throw new Error('empty reply');
                                 out = { say: raw, action: null };
@@ -14999,6 +15028,14 @@ case 'aieco': {
             )
         }, { quoted: msg });
     }
+    if (sub === 'lang') {
+        const l = (args[1] || '').toLowerCase();
+        if (!['si', 'sinhala', 'singlish'].includes(l)) {
+            return await socket.sendMessage(sender, { text: `📝 *Use:* \`${P5}aieco lang si\` (Sinhala) | \`${P5}aieco lang singlish\`` }, { quoted: msg });
+        }
+        await saveEco({ AI_ECO_LANG: l === 'singlish' ? 'singlish' : 'si' });
+        return await socket.sendMessage(sender, { text: `✅ *AI bhashawa:* ${l === 'singlish' ? 'Singlish' : 'Sinhala'}` }, { quoted: msg });
+    }
     if (sub === 'prompt') {
         const p = args.slice(1).join(' ').trim();
         if (!p) {
@@ -15015,7 +15052,7 @@ case 'aieco': {
     return await socket.sendMessage(sender, {
         text: formatMessage(
             '🤖 AI ECO',
-            `*Status:* ${isOn ? 'ON ✅' : 'OFF ❌'}\n*Extra prompt:* ${sessionConfig.AI_ECO_PROMPT ? '_' + sessionConfig.AI_ECO_PROMPT.slice(0, 80) + '_' : '_(none)_'}\n\n📝 *Use:*\n\`${P5}aieco on\`\n\`${P5}aieco off\`\n\`${P5}aieco prompt <extra instructions>\``,
+            `*Status:* ${isOn ? 'ON ✅' : 'OFF ❌'}\n*Language:* ${sessionConfig.AI_ECO_LANG === 'singlish' ? 'Singlish' : 'Sinhala'}\n*Extra prompt:* ${sessionConfig.AI_ECO_PROMPT ? '_' + sessionConfig.AI_ECO_PROMPT.slice(0, 80) + '_' : '_(none)_'}\n\n📝 *Use:*\n\`${P5}aieco on\`\n\`${P5}aieco off\`\n\`${P5}aieco lang si|singlish\`\n\`${P5}aieco prompt <extra instructions>\``,
             ecoFooter
         )
     }, { quoted: msg });
