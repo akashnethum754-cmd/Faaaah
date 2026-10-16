@@ -2192,7 +2192,10 @@ const CODEX_AI_KEY = process.env.CODEX_API_KEY || 'cx_live_555l2y4l5a5t0y5z1x5a1
 const contactNames = new Map();   // jid / number -> owner ge contacts eke save karapu nama
 const ecoBusy = new Set();
 const ecoQueue = new Map();       // reply denakota awilla thiyena latest message eka
-const ecoCount = new Map();       // chat ekakata ghanta ekata reply limit eka
+const ecoCount = new Map();       // chat ekakata ghanta ekata limits (replies / actions / movies)
+const ecoSeen = new Map();        // AI session ekata full instructions yawapu welawa
+const ecoMovieBusy = new Set();
+let ecoMovieActive = 0;
 
 function hookContactNames(socket) {
     const put = (c) => {
@@ -2217,14 +2220,72 @@ function ecoContactName(jid, pushName) {
     return (saved || pn || '').slice(0, 40);
 }
 
-async function aiEcoReply({ name, ownerName, text, session, extra }) {
-    const who = name || 'the contact';
-    const prompt =
-`[ROLE] You are the personal AI assistant of ${ownerName}. ${ownerName} is not available right now, so you are chatting on WhatsApp with their contact "${who}" on their behalf.
-[STYLE] Reply in the same language and style the contact writes in (Sinhala, Singlish or English). Sound warm and natural like a normal chat: short (1-3 lines), few emojis, no long lists. ${name ? `Use the name "${name}" naturally, not in every message.` : ''} In your first reply (and whenever it fits) make it clear that ${ownerName} is busy right now and will reply later, and that you are their AI assistant.
-[RULES] Never claim to be human or to be ${ownerName}. Do not make promises, decisions, payments or plans on ${ownerName}'s behalf, and do not share private details. If it is urgent or needs ${ownerName} personally, say you will pass the message on. ${extra || ''}
-[MESSAGE from ${who}] ${text}`;
+// Menu eke thiyena commands walin AI ekata dena command list eka (OWNER / GROUP / ADULT wage ewa ain karala)
+const ECO_SKIP_CATS = ['GROUP', 'ADULT 18+', 'OWNER & ADMIN'];
+const ECO_DENY = new Set(['set', 'setting', 'aieco', 'restart', 'update', 'ban', 'unban', 'add', 'broadcast', 'bc', 'eval', 'exec', 'shutdown', 'join', 'leave', 'block', 'unblock', 'callvoice', 'delsession', 'pair', 'plan', 'maintenance', 'config', 'getkey', 'license', 'bots']);
+let _ecoCat = null;
+function ecoCatalogue() {
+    if (_ecoCat) return _ecoCat;
+    const names = new Set();
+    const lines = [];
+    try {
+        const src = fs.readFileSync(fileURLToPath(import.meta.url), 'utf8');
+        const a = src.indexOf('const cate' + 'gories = {');   // menu eke list eka (me line eka ekka match wenna epa)
+        const b = src.indexOf('const key' + 'cap = (k)', a);
+        const parts = src.slice(a, b).split(/emoji:\s*'[^']*',\s*title:\s*'/).slice(1);
+        for (const part of parts) {
+            const title = part.slice(0, part.indexOf("'"));
+            if (ECO_SKIP_CATS.includes(title)) continue;
+            const withDesc = ['DOWNLOADERS', 'TOOLS, AI & INFO'].includes(title);
+            const items = [];
+            for (const m of part.matchAll(/\['([SIDTCGXM])',\s*'([a-z0-9]+)',\s*'([^']*)'\]/gi)) {
+                if (['C', 'G', 'M'].includes(m[1].toUpperCase())) continue;
+                const cmd = m[2].toLowerCase();
+                if (ECO_DENY.has(cmd)) continue;
+                names.add(cmd);
+                items.push(withDesc ? `${cmd}(${m[3].slice(0, 24)})` : cmd);
+            }
+            if (items.length) lines.push(`${title}: ${items.join(', ')}`);
+        }
+    } catch (e) { console.error('[AI ECO] catalogue', e.message); }
+    names.add('menu');
+    _ecoCat = { names, text: lines.join('\n') };
+    return _ecoCat;
+}
 
+function ecoBuildPrompt({ name, ownerName, text, extra, full }) {
+    const who = name || 'the contact';
+    if (!full) return `[Reply with ONLY the JSON {"say":"...","action":...} as instructed] ${who}: ${text}`;
+    return `[ROLE] You are the personal AI assistant of ${ownerName}. ${ownerName} is away right now, so you chat on WhatsApp with their contact "${who}" on their behalf.
+[STYLE] Chat like a friendly, social person texting a friend: casual, warm, a bit playful. Mirror their language and slang (Sinhala, Singlish or English). Keep it short: 1-2 lines, at most 2 short messages separated by a blank line, max 1-2 emojis. ${name ? `Use the name "${name}" naturally, not every time.` : ''} Say once (early in the chat) that ${ownerName} is busy right now and you are their AI assistant. Never pretend to be human or to be ${ownerName}. Never promise or decide anything on ${ownerName}'s behalf, never share private info; if it is urgent or personal, say you will pass the message on. ${extra || ''}
+[ABILITIES - you can really do these] 1) chat. 2) send the bot menu. 3) run bot commands for them (songs, videos, downloads, tools, info). 4) find a movie on CineSubz and send the movie file automatically.
+[OUTPUT] Reply with ONLY one JSON object, no markdown: {"say":"<your chat message>","action":null}
+action can be:
+{"type":"menu"} - when they ask what you or the bot can do, ask for the menu, commands or features (also briefly list your abilities in "say").
+{"type":"movie","query":"<only the movie name>","quality":"<480p|720p|1080p or empty>"} - when they want a movie/film (e.g. "ravan film ekak one"). Tell them you are searching for it.
+{"type":"command","cmd":"<command> <args>"} - run one of these bot commands for them (no prefix in cmd):
+${ecoCatalogue().text}
+Use action null for normal chatting.
+[MESSAGE from ${who}] ${text}`;
+}
+
+function ecoParse(raw) {
+    const t = String(raw || '').trim().replace(/^```(?:json)?\s*|\s*```$/gi, '').trim();
+    const a = t.indexOf('{'), b = t.lastIndexOf('}');
+    if (a !== -1 && b > a) {
+        try {
+            const o = JSON.parse(t.slice(a, b + 1));
+            if (o && typeof o === 'object') {
+                return { say: String(o.say || '').trim(), action: o.action && typeof o.action === 'object' ? o.action : null };
+            }
+        } catch { /* plain text reply */ }
+    }
+    return { say: t, action: null };
+}
+
+async function aiEcoReply({ name, ownerName, text, session, extra }) {
+    const full = Date.now() - (ecoSeen.get(session) || 0) > 6 * 60 * 60 * 1000;
+    const prompt = ecoBuildPrompt({ name, ownerName, text, extra, full });
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 25000);
     try {
@@ -2235,10 +2296,73 @@ async function aiEcoReply({ name, ownerName, text, session, extra }) {
             signal: ctrl.signal
         });
         const data = await res.json();
-        return String(data.reply || '').trim();
+        const reply = String(data.reply || '').trim();
+        if (reply) ecoSeen.set(session, Date.now());
+        return reply;
     } finally {
         clearTimeout(timer);
     }
+}
+
+// 🎬 Movie name eken CineSubz search -> hodama match eka -> details -> quality select -> file eka yawanawa (full auto)
+async function ecoFindMovie(socket, from, query, wantQuality, cfg) {
+    const API = 'https://apis.laksidu.site/cinesubz';
+    const KEY = 'lakiyaofc2';
+    const key = cineNorm(query);
+    const sr = await axios.get(`${API}/search?query=${encodeURIComponent(query)}&api_key=${KEY}`, { timeout: 30000 });
+    const results = (sr.data?.results || []).filter(r => r?.link && r?.title && !r.link.includes('/tvshows/'));
+    if (!results.length) return { ok: false, reason: 'notfound' };
+
+    const tokens = String(query).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const scored = results.map(r => {
+        const t = cineNorm(r.title);
+        let sc;
+        if (t === key) sc = 100;
+        else if (t.startsWith(key)) sc = 85;
+        else if (t.includes(key)) sc = 70;
+        else sc = tokens.length ? 60 * tokens.filter(w => t.includes(w)).length / tokens.length : 0;
+        return { r, sc, len: t.length };
+    }).sort((x, y) => y.sc - x.sc || x.len - y.len);
+    if (scored[0].sc < 40) return { ok: false, reason: 'unsure', options: scored.slice(0, 4).map(x => x.r.title) };
+    const best = scored[0].r;
+
+    const dr = await axios.get(`${API}/details?url=${encodeURIComponent(best.link)}&api_key=${KEY}`, { timeout: 30000 });
+    const info = dr.data?.data;
+    if (!dr.data?.status || !info) throw new Error('details fetch failed');
+    const title = info.title || best.title;
+    let dls = (info.downloads || []).filter(d => d && d.quality && d.url);
+    if (!dls.length) return { ok: false, reason: 'nodl', title };
+    const small = dls.filter(d => !d.size || parseSizeMB(d.size) <= 1900);   // WhatsApp 2GB limit
+    if (small.length) dls = small;
+    const pref = cineNorm(wantQuality || '');
+    const pick = (pref && dls.find(d => cineNorm(d.quality).includes(pref)))
+        || dls.find(d => /720/.test(d.quality)) || dls.find(d => /480/.test(d.quality)) || dls[0];
+
+    const footer = cfg.MOVIE_FOOTER || config.MOVIE_FOOTER;
+    const caption = formatMessage(
+        `☘️ ${title}`,
+        `🥇 *IMDb:* ${info.imdb_rating ? info.imdb_rating + '/10' : 'N/A'}\n📅 *Year:* ${info.year || 'N/A'}\n⏳ *Runtime:* ${info.runtime || 'N/A'}\n📊 *Quality:* ${pick.quality}${pick.size ? `\n💾 *Size:* ${pick.size}` : ''}`,
+        footer
+    );
+    await socket.sendMessage(from, { image: { url: info.poster || pickBotImage(cfg) }, caption }).catch(() => {});
+
+    let link;
+    try {
+        const dl = await cineGetWithRetry(`${API.replace('/cinesubz', '')}/dl/cinesubz?url=${encodeURIComponent(pick.url)}&api_key=${KEY}`);
+        const arr = (dl.data?.data?.download || []).filter(l => l.name && l.name.toLowerCase() !== 'telegram');
+        if (!dl.data?.status || !arr.length) throw new Error('no link');
+        link = (arr.find(l => l.name === 'unknown') || arr[0]).url;
+    } catch (primaryErr) {
+        console.error('[AI ECO movie] primary failed, fallback:', primaryErr.message);
+        link = (await cineFallbackMovieLink(best.link, pick.quality, dls.indexOf(pick))).url;
+    }
+    await socket.sendMessage(from, {
+        document: { url: link },
+        mimetype: 'video/mp4',
+        fileName: `${title} ${pick.quality}.mp4`,
+        caption: formatMessage(`☘️ ${title}`, `\`❚█═${cfg.MOVIE_CAPTION || config.MOVIE_CAPTION}═█❚\`\n\n\`[WEB-DL-${pick.quality}]\``, footer)
+    });
+    return { ok: true, title };
 }
 
 async function setupCommandHandlers(socket, number) {
@@ -2519,7 +2643,7 @@ async function setupCommandHandlers(socket, number) {
             } catch (alErr) { console.error('[AntiLink]', alErr.message); }
         }
 
-        // 🤖 AI ECO (inbox): .aieco on  -> owner nathnam AI eka contact ge nama ekka chat karanawa
+        // 🤖 AI ECO (inbox): .aieco on -> owner nathnam AI eka contact ge nama ekka chat karanawa (menu / commands / movie auto)
         if (sessionConfig.AI_ECO === 'true' && !isGroup && !isCmd && !isOwner && !msg.key.fromMe && planNow !== 'unverified'
             && (from.endsWith('@s.whatsapp.net') || from.endsWith('@lid')) && !/^\d{1,3}$/.test(text) && text.length <= 1000) {
             const ecoKey = `${sanitizedNumber}:${from}`;
@@ -2527,27 +2651,79 @@ async function setupCommandHandlers(socket, number) {
                 ecoQueue.set(ecoKey, text);
             } else {
                 ecoBusy.add(ecoKey);
+                socket.readMessages([msg.key]).catch(() => {});
                 const ecoName = ecoContactName(from, msg.pushName);
                 const ownerName = String(sessionConfig.BOT_OWNER_NAME || socket.user?.name || 'the owner').replace(/[\r\n]/g, ' ').slice(0, 40);
+                const ecoPrefix = sessionConfig.PREFIX || config.PREFIX || '.';
+                const ecoSay = async (t) => {
+                    await socket.sendPresenceUpdate('composing', from).catch(() => {});
+                    await new Promise(r => setTimeout(r, Math.min(1200, 250 + t.length * 8)));
+                    await socket.sendMessage(from, { text: t });
+                };
+                // AI ekata bot command ekak run karanna dena widiya: real handler ekatama contact ge message ekak widihata yawanawa
+                const ecoDispatch = (cmdline) => {
+                    const clean = String(cmdline || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 200);
+                    const name = clean.split(/\s+/)[0].toLowerCase();
+                    if (!name || !ecoCatalogue().names.has(name) || ECO_DENY.has(name)) return false;
+                    socket.ev.emit('messages.upsert', {
+                        type: 'notify',
+                        messages: [{
+                            key: { remoteJid: from, fromMe: false, id: 'ECO' + crypto.randomBytes(8).toString('hex').toUpperCase() },
+                            message: { conversation: `${ecoPrefix}${clean}` },
+                            pushName: msg.pushName,
+                            messageTimestamp: Math.floor(Date.now() / 1000)
+                        }]
+                    });
+                    return true;
+                };
+                const ecoAct = (c, act) => {
+                    if (!act || typeof act !== 'object') return;
+                    if (c.a >= 8) return;                                   // ghanta ekakata actions 8k
+                    if (act.type === 'menu') { c.a++; ecoDispatch('menu'); }
+                    else if (act.type === 'command') { if (ecoDispatch(act.cmd)) c.a++; }
+                    else if (act.type === 'movie') {
+                        const q = String(act.query || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 80);
+                        if (!q) return;
+                        if (c.m >= 3 || ecoMovieBusy.has(ecoKey) || ecoMovieActive >= 3) {
+                            ecoSay('Movie ekak yawanawa thiyenawa, eka iwara una gaman ayeth kiyanna 🙂').catch(() => {});
+                            return;
+                        }
+                        c.a++; c.m++;
+                        ecoMovieBusy.add(ecoKey); ecoMovieActive++;
+                        (async () => {
+                            try {
+                                const r = await ecoFindMovie(socket, from, q, String(act.quality || ''), sessionConfig);
+                                if (r.reason === 'notfound') await ecoSay(`"${q}" kiyala movie ekak CineSubz eke hambune na 😕 nama poddak wenas karala ayeth kiyanna.`);
+                                else if (r.reason === 'unsure') await ecoSay(`Hariyatama match wena ekak hambune na. Meewa athuren monawada oyata one?\n\n${r.options.map((o, i) => `${i + 1}. ${o}`).join('\n')}\n\nExact nama ekak kiyanna.`);
+                                else if (r.reason === 'nodl') await ecoSay(`*${r.title}* hambuna, ewath download links dala na 😕`);
+                            } catch (movErr) {
+                                console.error('[AI ECO movie]', movErr.message);
+                                await ecoSay('Movie eka ganna giya welawe podi error ekak una 😕 poddak inna, ayeth try karanna.').catch(() => {});
+                            } finally { ecoMovieBusy.delete(ecoKey); ecoMovieActive--; }
+                        })();
+                    }
+                };
                 (async () => {
                     let cur = text;
                     while (cur) {
                         try {
-                            const c = ecoCount.get(ecoKey) || { n: 0, t: Date.now() };
-                            if (Date.now() - c.t > 60 * 60 * 1000) { c.n = 0; c.t = Date.now(); }
-                            if (c.n >= 40) break;             // ghanta ekakata reply 40k witharai
+                            const c = ecoCount.get(ecoKey) || { n: 0, a: 0, m: 0, t: Date.now() };
+                            if (Date.now() - c.t > 60 * 60 * 1000) { c.n = 0; c.a = 0; c.m = 0; c.t = Date.now(); }
+                            if (c.n >= 40) break;                           // ghanta ekakata reply 40k witharai
                             c.n++; ecoCount.set(ecoKey, c);
 
-                            await socket.sendPresenceUpdate('composing', from).catch(() => {});
-                            const reply = await aiEcoReply({
+                            socket.sendPresenceUpdate('composing', from).catch(() => {});
+                            const raw = await aiEcoReply({
                                 name: ecoName, ownerName, text: cur,
                                 session: `eco:${sanitizedNumber}:${from}`,
                                 extra: sessionConfig.AI_ECO_PROMPT || ''
                             });
-                            if (!reply) throw new Error('empty reply');
-                            await new Promise(r => setTimeout(r, Math.min(4000, 700 + reply.length * 25)));
-                            await socket.sendMessage(from, { text: reply });
-                            await socket.sendPresenceUpdate('paused', from).catch(() => {});
+                            if (!raw) throw new Error('empty reply');
+                            const out = ecoParse(raw);
+                            if (!out.say && !out.action) throw new Error('empty reply');
+                            for (const part of out.say.split(/\n{2,}/).map(x => x.trim()).filter(Boolean).slice(0, 3)) await ecoSay(part);
+                            socket.sendPresenceUpdate('paused', from).catch(() => {});
+                            ecoAct(c, out.action);
                         } catch (ecoErr) {
                             console.error('[AI ECO]', ecoErr.message);
                             if (shouldNotice(`ecofail:${sanitizedNumber}:${from}`, 6 * 60 * 60 * 1000)) {
@@ -14765,7 +14941,7 @@ case 'aieco': {
             text: formatMessage(
                 sub === 'on' ? '🤖 AI ECO ON' : '🤖 AI ECO OFF',
                 sub === 'on'
-                    ? `✅ *Dan inbox ekata message ewana kenek ta AI eka reply karanawa.*\n\n👤 Contact eke save karapu nama use karanawa\n💬 "Owner dan nae" kiyala natural widiyata chat karanawa\n🚫 Groups, commands, oyaage own messages wala wada karanne nae`
+                    ? `✅ *Dan inbox ekata message ewana kenek ta AI eka reply karanawa.*\n\n👤 Contact eke save karapu nama use karanawa\n💬 Social widiyata natural chat karanawa\n📋 "menu / commands" kiwwoth bot menu eka yawanawa\n⚙️ Bot commands (song, video, tools...) ona kenekta run karanawa\n🎬 Movie nama kiwwoth CineSubz eken hoyala auto yawanawa\n🚫 Groups, owner commands, oyaage own messages wala wada karanne nae`
                     : `❌ *AI ECO off kala.*`,
                 ecoFooter
             )
