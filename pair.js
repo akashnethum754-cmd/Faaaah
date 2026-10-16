@@ -606,6 +606,8 @@ const config = {
     WELCOME_MSG: '',
     AWAY: 'false',        // inbox auto-reply (busy message)
     AWAY_MSG: '',
+    AI_ECO: 'false',      // inbox ekata AI chat (.aieco on/off)
+    AI_ECO_PROMPT: '',    // AI ekata extra instructions (optional)
     COOLDOWN: '2.5',      // seconds, command spam guard (0 = off)
     FREE_DAILY_LIMIT: 4   // free bot: dawasata movie (video file) 4k, hama command ekkama ekathuwa
 };
@@ -2184,10 +2186,66 @@ async function setupAutoReply(socket, number) {
     console.log('✅ Auto-reply handler ready');
 }
 
+// ==================== 🤖 AI ECO (owner nathnam inbox eke AI chat karanawa) ====================
+const CODEX_AI_URL = process.env.CODEX_AI_URL || 'https://code-x-ai.lovable.app/api/public/v1/chat';
+const CODEX_AI_KEY = process.env.CODEX_API_KEY || 'cx_live_555l2y4l5a5t0y5z1x5a1i4j221o5h3j';
+const contactNames = new Map();   // jid / number -> owner ge contacts eke save karapu nama
+const ecoBusy = new Set();
+const ecoQueue = new Map();       // reply denakota awilla thiyena latest message eka
+const ecoCount = new Map();       // chat ekakata ghanta ekata reply limit eka
+
+function hookContactNames(socket) {
+    const put = (c) => {
+        if (!c) return;
+        const nm = c.name || c.verifiedName;      // address book name (notify = pushName, eka ganne na)
+        if (!nm) return;
+        for (const j of [c.id, c.lid, c.phoneNumber]) {
+            if (!j) continue;
+            contactNames.set(j, nm);
+            contactNames.set(String(j).split('@')[0].split(':')[0], nm);
+        }
+    };
+    socket.ev.on('contacts.upsert', (list) => (list || []).forEach(put));
+    socket.ev.on('contacts.update', (list) => (list || []).forEach(put));
+    socket.ev.on('messaging-history.set', ({ contacts }) => (contacts || []).forEach(put));
+}
+
+function ecoContactName(jid, pushName) {
+    const num = String(jid || '').split('@')[0].split(':')[0];
+    const saved = contactNames.get(jid) || contactNames.get(num);
+    const pn = String(pushName || '').replace(/[\r\n*_~`]/g, '').trim();
+    return (saved || pn || '').slice(0, 40);
+}
+
+async function aiEcoReply({ name, ownerName, text, session, extra }) {
+    const who = name || 'the contact';
+    const prompt =
+`[ROLE] You are the personal AI assistant of ${ownerName}. ${ownerName} is not available right now, so you are chatting on WhatsApp with their contact "${who}" on their behalf.
+[STYLE] Reply in the same language and style the contact writes in (Sinhala, Singlish or English). Sound warm and natural like a normal chat: short (1-3 lines), few emojis, no long lists. ${name ? `Use the name "${name}" naturally, not in every message.` : ''} In your first reply (and whenever it fits) make it clear that ${ownerName} is busy right now and will reply later, and that you are their AI assistant.
+[RULES] Never claim to be human or to be ${ownerName}. Do not make promises, decisions, payments or plans on ${ownerName}'s behalf, and do not share private details. If it is urgent or needs ${ownerName} personally, say you will pass the message on. ${extra || ''}
+[MESSAGE from ${who}] ${text}`;
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 25000);
+    try {
+        const res = await fetch(CODEX_AI_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CODEX_AI_KEY}` },
+            body: JSON.stringify({ message: prompt, session }),
+            signal: ctrl.signal
+        });
+        const data = await res.json();
+        return String(data.reply || '').trim();
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 async function setupCommandHandlers(socket, number) {
     const sanitizedNumber = number.replace(/[^0-9]/g, '');
     let sessionConfig = await loadUserConfig(sanitizedNumber);
     activeSockets.set(sanitizedNumber, { socket, config: sessionConfig });
+    hookContactNames(socket);
 
     // 🔘 Button mode engine (BUTTON_MODE=true nam numbered lists buttons wenawa)
     // 🔒 Button mode: master (94784224161) + .add eken subscription dunna numbers walata witharai
@@ -2461,8 +2519,51 @@ async function setupCommandHandlers(socket, number) {
             } catch (alErr) { console.error('[AntiLink]', alErr.message); }
         }
 
+        // 🤖 AI ECO (inbox): .aieco on  -> owner nathnam AI eka contact ge nama ekka chat karanawa
+        if (sessionConfig.AI_ECO === 'true' && !isGroup && !isCmd && !isOwner && !msg.key.fromMe && planNow !== 'unverified'
+            && (from.endsWith('@s.whatsapp.net') || from.endsWith('@lid')) && !/^\d{1,3}$/.test(text) && text.length <= 1000) {
+            const ecoKey = `${sanitizedNumber}:${from}`;
+            if (ecoBusy.has(ecoKey)) {
+                ecoQueue.set(ecoKey, text);
+            } else {
+                ecoBusy.add(ecoKey);
+                const ecoName = ecoContactName(from, msg.pushName);
+                const ownerName = String(sessionConfig.BOT_OWNER_NAME || socket.user?.name || 'the owner').replace(/[\r\n]/g, ' ').slice(0, 40);
+                (async () => {
+                    let cur = text;
+                    while (cur) {
+                        try {
+                            const c = ecoCount.get(ecoKey) || { n: 0, t: Date.now() };
+                            if (Date.now() - c.t > 60 * 60 * 1000) { c.n = 0; c.t = Date.now(); }
+                            if (c.n >= 40) break;             // ghanta ekakata reply 40k witharai
+                            c.n++; ecoCount.set(ecoKey, c);
+
+                            await socket.sendPresenceUpdate('composing', from).catch(() => {});
+                            const reply = await aiEcoReply({
+                                name: ecoName, ownerName, text: cur,
+                                session: `eco:${sanitizedNumber}:${from}`,
+                                extra: sessionConfig.AI_ECO_PROMPT || ''
+                            });
+                            if (!reply) throw new Error('empty reply');
+                            await new Promise(r => setTimeout(r, Math.min(4000, 700 + reply.length * 25)));
+                            await socket.sendMessage(from, { text: reply });
+                            await socket.sendPresenceUpdate('paused', from).catch(() => {});
+                        } catch (ecoErr) {
+                            console.error('[AI ECO]', ecoErr.message);
+                            if (shouldNotice(`ecofail:${sanitizedNumber}:${from}`, 6 * 60 * 60 * 1000)) {
+                                await socket.sendMessage(from, { text: sessionConfig.AWAY_MSG || '💤 *Mama dan busy.*\n_Passe reply karannam._' }).catch(() => {});
+                            }
+                            break;
+                        }
+                        cur = ecoQueue.get(ecoKey);
+                        ecoQueue.delete(ecoKey);
+                    }
+                })().finally(() => { ecoBusy.delete(ecoKey); ecoQueue.delete(ecoKey); });
+            }
+        }
+
         // 💤 AWAY auto-reply (inbox, eka user ta 6h ekakata parak): .set AWAY:on , AWAY_MSG:...
-        if (!isGroup && !isCmd && !isOwner && !msg.key.fromMe && from !== 'status@broadcast' && sessionConfig.AWAY === 'true' && planNow !== 'unverified'
+        if (!isGroup && !isCmd && !isOwner && !msg.key.fromMe && from !== 'status@broadcast' && sessionConfig.AWAY === 'true' && sessionConfig.AI_ECO !== 'true' && planNow !== 'unverified'
             && !/^\d{1,3}$/.test(text) && !msg.message.extendedTextMessage?.contextInfo?.quotedMessage) {
             if (shouldNotice(`away:${sanitizedNumber}:${from}`, 6 * 60 * 60 * 1000)) {
                 await socket.sendMessage(from, { text: sessionConfig.AWAY_MSG || '💤 *Mama dan busy.*\n_Passe reply karannam._' }, { quoted: msg });
@@ -3996,6 +4097,7 @@ case 'help': {
                     ['I', 'news', 'Sri Lanka news'],
                     ['I', 'config', 'Channel latest message'],
                     ['T', 'ai', 'AI chat'],
+                    ['T', 'aieco', 'AI auto chat on/off (owner away)'],
                     ['T', 'aiimage', 'AI image generator'],
                     ['T', 'sticker', 'Image → sticker'],
                     ['T', 'toimg', 'Sticker → image'],
@@ -14645,6 +14747,53 @@ case 'remind': {
 break;
 
 
+case 'aieco': {
+    if (!isOwner) {
+        return await socket.sendMessage(sender, { text: '❌ *Bot owner witharai meka use karanna puluwan.*' }, { quoted: msg });
+    }
+    const P5 = sessionConfig.PREFIX || config.PREFIX || '.';
+    const ecoFooter = sessionConfig.BOT_FOOTER || config.BOT_FOOTER;
+    const sub = (args[0] || '').toLowerCase();
+    const saveEco = async (upd) => {
+        sessionConfig = { ...sessionConfig, ...upd };
+        await updateUserConfig(sanitizedNumber, sessionConfig);
+        activeSockets.set(sanitizedNumber, { socket, config: sessionConfig });
+    };
+    if (sub === 'on' || sub === 'off') {
+        await saveEco({ AI_ECO: sub === 'on' ? 'true' : 'false' });
+        return await socket.sendMessage(sender, {
+            text: formatMessage(
+                sub === 'on' ? '🤖 AI ECO ON' : '🤖 AI ECO OFF',
+                sub === 'on'
+                    ? `✅ *Dan inbox ekata message ewana kenek ta AI eka reply karanawa.*\n\n👤 Contact eke save karapu nama use karanawa\n💬 "Owner dan nae" kiyala natural widiyata chat karanawa\n🚫 Groups, commands, oyaage own messages wala wada karanne nae`
+                    : `❌ *AI ECO off kala.*`,
+                ecoFooter
+            )
+        }, { quoted: msg });
+    }
+    if (sub === 'prompt') {
+        const p = args.slice(1).join(' ').trim();
+        if (!p) {
+            return await socket.sendMessage(sender, { text: `📝 *Use:* \`${P5}aieco prompt Mama exam ekak nisa busy, urgent nam call karanna kiyanna\`\n_Reset karanna:_ \`${P5}aieco prompt off\`` }, { quoted: msg });
+        }
+        const clear = ['off', 'reset', 'default', 'none'].includes(p.toLowerCase());
+        if (!clear && p.length > 500) {
+            return await socket.sendMessage(sender, { text: '❌ Prompt eka characters 500ta wada adu wenna one.' }, { quoted: msg });
+        }
+        await saveEco({ AI_ECO_PROMPT: clear ? '' : p });
+        return await socket.sendMessage(sender, { text: clear ? '✅ *AI prompt reset kala.*' : '✅ *AI prompt update kala.*' }, { quoted: msg });
+    }
+    const isOn = sessionConfig.AI_ECO === 'true';
+    return await socket.sendMessage(sender, {
+        text: formatMessage(
+            '🤖 AI ECO',
+            `*Status:* ${isOn ? 'ON ✅' : 'OFF ❌'}\n*Extra prompt:* ${sessionConfig.AI_ECO_PROMPT ? '_' + sessionConfig.AI_ECO_PROMPT.slice(0, 80) + '_' : '_(none)_'}\n\n📝 *Use:*\n\`${P5}aieco on\`\n\`${P5}aieco off\`\n\`${P5}aieco prompt <extra instructions>\``,
+            ecoFooter
+        )
+    }, { quoted: msg });
+}
+break;
+
                     case 'ai':
 case 'codex': {
     const query = args.join(' ');
@@ -17832,9 +17981,9 @@ case 'setting': {
         'PREFIX', 'AUTO_RECORDING', 'AUTO_TYPING', 'MODE', 'JID',
         'ALWAYS_ONLINE', 'ALWAYS_MSG_SEEN', 'STATUS_VIEW', 'AUTO_LIKE',
         'ANTI_DELETE', 'BUTTON_MODE', 'MOVIE_FOOTER', 'MOVIE_CAPTION', 'BOT_NAME', 'BOT_IMAGE', 'BOT_FOOTER', 'AIR_FOOTER', 'CSONG_AUDIO',
-        'ANTI_CALL', 'ANTI_LINK', 'WELCOME', 'WELCOME_MSG', 'AWAY', 'AWAY_MSG', 'COOLDOWN'
+        'ANTI_CALL', 'ANTI_LINK', 'WELCOME', 'WELCOME_MSG', 'AWAY', 'AWAY_MSG', 'COOLDOWN', 'AI_ECO', 'AI_ECO_PROMPT'
     ];
-    const BOOL_KEYS = ['AUTO_RECORDING', 'AUTO_TYPING', 'ALWAYS_ONLINE', 'ALWAYS_MSG_SEEN', 'STATUS_VIEW', 'AUTO_LIKE', 'ANTI_DELETE', 'BUTTON_MODE', 'ANTI_CALL', 'WELCOME', 'AWAY'];
+    const BOOL_KEYS = ['AUTO_RECORDING', 'AUTO_TYPING', 'ALWAYS_ONLINE', 'ALWAYS_MSG_SEEN', 'STATUS_VIEW', 'AUTO_LIKE', 'ANTI_DELETE', 'BUTTON_MODE', 'ANTI_CALL', 'WELCOME', 'AWAY', 'AI_ECO'];
     const GLOBAL_KEYS = ['MAINTENANCE', 'MAINTENANCE_MSG', 'FREE_LIMIT', 'MAX_DL', 'MIN_DISK_GB', 'DL_CONN'];
     const parseBool = (x) => {
         const lv = String(x).toLowerCase();
@@ -17875,6 +18024,7 @@ ${on('ANTI_CALL')} ANTI_CALL  (voice: ${hasCallVoice ? 'set' : 'not set - .callv
 👥 *Group / Inbox*
 ${on('WELCOME')} WELCOME  (${short(v('WELCOME_MSG') || 'default')})
 ${on('AWAY')} AWAY  (${short(v('AWAY_MSG') || 'default')})
+${on('AI_ECO')} AI_ECO  (.aieco)
 
 🎛 *UI*
 ${buttonAllowed() ? on('BUTTON_MODE') : '🔒'} BUTTON_MODE`;
@@ -17963,7 +18113,7 @@ _Wenas kirim ikmanata apply wenawa._`;
             const n = Number(value);
             if (!Number.isFinite(n) || n < 0 || n > 30) { problem = '`COOLDOWN` = 0 - 30 (seconds)'; break; }
             value = String(n);
-        } else if (key === 'WELCOME_MSG' || key === 'AWAY_MSG') {
+        } else if (key === 'WELCOME_MSG' || key === 'AWAY_MSG' || key === 'AI_ECO_PROMPT') {
             if (['off', 'reset', 'default', 'none'].includes(value.toLowerCase())) value = '';
             if (value.length > 500) { problem = `\`${key}\` characters 500ta wada adu wenna one.`; break; }
         }
