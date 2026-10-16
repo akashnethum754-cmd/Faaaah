@@ -2193,8 +2193,6 @@ const contactNames = new Map();   // jid / number -> owner ge contacts eke save 
 const ecoBusy = new Set();
 const ecoQueue = new Map();       // reply denakota awilla thiyena latest message eka
 const ecoCount = new Map();       // chat ekakata ghanta ekata limits (replies / actions / movies)
-const ecoMovieBusy = new Set();
-let ecoMovieActive = 0;
 
 function hookContactNames(socket) {
     const put = (c) => {
@@ -2314,7 +2312,7 @@ function ecoIntent(textRaw) {
     if (ECO_MENU_W.test(text) && words <= 9) return { type: 'menu' };
 
     if (ECO_MOVIE_W.test(text) && ECO_WANT.test(text)) {
-        const toks = ecoLeftover(text, ECO_MOVIE_W).filter(w => !ECO_MOVIE_W.test(w));
+        const toks = ecoLeftover(text, ECO_MOVIE_W).filter(w => !ECO_MOVIE_W.test(w) && w !== '1');   // 'avatar 1' -> avatar
         if (toks.length === 0) return { type: 'ask', what: 'film' };
         if (toks.length <= 6) return { type: 'movie', query: toks.join(' '), quality };
         return null;
@@ -2360,12 +2358,15 @@ function ecoParseList(txt) {
     return ok ? items : [];
 }
 function ecoScoreTitle(query, title) {
-    const key = cineNorm(query), t = cineNorm(title);
-    const tokens = String(query).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const all = String(query).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const core = all.filter(w => !/^\d{1,2}$/.test(w));
+    const need = all.filter(w => /^\d{1,2}$/.test(w) && w !== '1');       // sequel number (2, 3..) title eke thiyenna one
+    if (need.some(d => !new RegExp(`(^|[^0-9])${d}([^0-9]|$)`).test(String(title)))) return 0;
+    const key = cineNorm(core.join('') || query), t = cineNorm(title);
     if (t === key) return 100;
     if (t.startsWith(key)) return 85;
     if (t.includes(key)) return 70;
-    return tokens.length ? 60 * tokens.filter(w => t.includes(w)).length / tokens.length : 0;
+    return core.length ? 60 * core.filter(w => t.includes(w)).length / core.length : 0;
 }
 function ecoPickFromList(items, nav) {
     const isQ = items.filter(i => /\b(144|240|360|480|720|1080|2160)p?\b|\b4k\b/i.test(i.text)).length >= Math.max(2, Math.ceil(items.length / 2));
@@ -2391,7 +2392,11 @@ function ecoNavOnSend(socket, jid, content, res) {
     if (!items.length) return;
     if (nav.steps >= 4) { ecoNav.delete(jid); return; }
     const pick = ecoPickFromList(items, nav);
-    if (!pick) { ecoNav.delete(jid); return; }
+    if (!pick) {
+        ecoNav.delete(jid);
+        socket.sendMessage(jid, { text: 'Hariyatama match wena ekak therunne na 🤔 Udin thiyena list eken oyata one ekata adala *number eka* reply karanna.' }).catch(() => {});
+        return;
+    }
     nav.steps++;
     const botJid = jidNormalizedUser(socket.user.id);
     setTimeout(() => {
@@ -2415,67 +2420,6 @@ function hookEcoNav(socket) {
         try { ecoNavOnSend(socket, jid, content, res); } catch (e) { console.error('[AI ECO nav]', e.message); }
         return res;
     };
-}
-
-// 🎬 Movie name eken CineSubz search -> hodama match eka -> details -> quality select -> file eka yawanawa (full auto)
-async function ecoFindMovie(socket, from, query, wantQuality, cfg) {
-    const API = 'https://apis.laksidu.site/cinesubz';
-    const KEY = 'lakiyaofc2';
-    const key = cineNorm(query);
-    const sr = await axios.get(`${API}/search?query=${encodeURIComponent(query)}&api_key=${KEY}`, { timeout: 30000 });
-    const results = (sr.data?.results || []).filter(r => r?.link && r?.title && !r.link.includes('/tvshows/'));
-    if (!results.length) return { ok: false, reason: 'notfound' };
-
-    const tokens = String(query).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-    const scored = results.map(r => {
-        const t = cineNorm(r.title);
-        let sc;
-        if (t === key) sc = 100;
-        else if (t.startsWith(key)) sc = 85;
-        else if (t.includes(key)) sc = 70;
-        else sc = tokens.length ? 60 * tokens.filter(w => t.includes(w)).length / tokens.length : 0;
-        return { r, sc, len: t.length };
-    }).sort((x, y) => y.sc - x.sc || x.len - y.len);
-    if (scored[0].sc < 40) return { ok: false, reason: 'unsure', options: scored.slice(0, 4).map(x => x.r.title) };
-    const best = scored[0].r;
-
-    const dr = await axios.get(`${API}/details?url=${encodeURIComponent(best.link)}&api_key=${KEY}`, { timeout: 30000 });
-    const info = dr.data?.data;
-    if (!dr.data?.status || !info) throw new Error('details fetch failed');
-    const title = info.title || best.title;
-    let dls = (info.downloads || []).filter(d => d && d.quality && d.url);
-    if (!dls.length) return { ok: false, reason: 'nodl', title };
-    const small = dls.filter(d => !d.size || parseSizeMB(d.size) <= 1900);   // WhatsApp 2GB limit
-    if (small.length) dls = small;
-    const pref = cineNorm(wantQuality || '');
-    const pick = (pref && dls.find(d => cineNorm(d.quality).includes(pref)))
-        || dls.find(d => /720/.test(d.quality)) || dls.find(d => /480/.test(d.quality)) || dls[0];
-
-    const footer = cfg.MOVIE_FOOTER || config.MOVIE_FOOTER;
-    const caption = formatMessage(
-        `☘️ ${title}`,
-        `🥇 *IMDb:* ${info.imdb_rating ? info.imdb_rating + '/10' : 'N/A'}\n📅 *Year:* ${info.year || 'N/A'}\n⏳ *Runtime:* ${info.runtime || 'N/A'}\n📊 *Quality:* ${pick.quality}${pick.size ? `\n💾 *Size:* ${pick.size}` : ''}`,
-        footer
-    );
-    await socket.sendMessage(from, { image: { url: info.poster || pickBotImage(cfg) }, caption }).catch(() => {});
-
-    let link;
-    try {
-        const dl = await cineGetWithRetry(`${API.replace('/cinesubz', '')}/dl/cinesubz?url=${encodeURIComponent(pick.url)}&api_key=${KEY}`);
-        const arr = (dl.data?.data?.download || []).filter(l => l.name && l.name.toLowerCase() !== 'telegram');
-        if (!dl.data?.status || !arr.length) throw new Error('no link');
-        link = (arr.find(l => l.name === 'unknown') || arr[0]).url;
-    } catch (primaryErr) {
-        console.error('[AI ECO movie] primary failed, fallback:', primaryErr.message);
-        link = (await cineFallbackMovieLink(best.link, pick.quality, dls.indexOf(pick))).url;
-    }
-    await socket.sendMessage(from, {
-        document: { url: link },
-        mimetype: 'video/mp4',
-        fileName: `${title} ${pick.quality}.mp4`,
-        caption: formatMessage(`☘️ ${title}`, `\`❚█═${cfg.MOVIE_CAPTION || config.MOVIE_CAPTION}═█❚\`\n\n\`[WEB-DL-${pick.quality}]\``, footer)
-    });
-    return { ok: true, title };
 }
 
 async function setupCommandHandlers(socket, number) {
@@ -2798,23 +2742,12 @@ async function setupCommandHandlers(socket, number) {
                     else if (act.type === 'movie') {
                         const q = String(act.query || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 80);
                         if (!q) return;
-                        if (c.m >= 3 || ecoMovieBusy.has(ecoKey) || ecoMovieActive >= 3) {
-                            ecoSay('Movie ekak yawanawa thiyenawa, eka iwara una gaman ayeth kiyanna 🙂').catch(() => {});
+                        if (c.m >= 3) {
+                            ecoSay('Movie godak illuwa, poddak inna iwara una gaman ayeth kiyanna 🙂').catch(() => {});
                             return;
                         }
-                        c.a++; c.m++;
-                        ecoMovieBusy.add(ecoKey); ecoMovieActive++;
-                        (async () => {
-                            try {
-                                const r = await ecoFindMovie(socket, from, q, String(act.quality || ''), sessionConfig);
-                                if (r.reason === 'notfound') await ecoSay(`"${q}" kiyala movie ekak CineSubz eke hambune na 😕 nama poddak wenas karala ayeth kiyanna.`);
-                                else if (r.reason === 'unsure') await ecoSay(`Hariyatama match wena ekak hambune na. Meewa athuren monawada oyata one?\n\n${r.options.map((o, i) => `${i + 1}. ${o}`).join('\n')}\n\nExact nama ekak kiyanna.`);
-                                else if (r.reason === 'nodl') await ecoSay(`*${r.title}* hambuna, ewath download links dala na 😕`);
-                            } catch (movErr) {
-                                console.error('[AI ECO movie]', movErr.message);
-                                await ecoSay('Movie eka ganna giya welawe podi error ekak una 😕 poddak inna, ayeth try karanna.').catch(() => {});
-                            } finally { ecoMovieBusy.delete(ecoKey); ecoMovieActive--; }
-                        })();
+                        // .cinesubz command eke case eka thamai run wenne: search -> select -> quality -> mp4 (steps auto)
+                        if (ecoDispatch(`cinesubz ${q}`)) { c.a++; c.m++; ecoNavStart(from, q, act.quality, msg.pushName); }
                     }
                 };
                 (async () => {
