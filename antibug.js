@@ -163,6 +163,8 @@ export function installBugShield(socket, opts = {}) {
     const blockedJids = new Set();
     const notified = new Map();     // sender -> last notify
     const queue = new Map();        // chat -> { items: [{key, ts}], timer, reason, sender, info }
+    const retryList = [];           // delete fail unoth (sync key nathi wage) -> passe hari retry karanna
+    const MAX_RETRY = 6;
 
     const gc = setInterval(() => {
         const now = Date.now();
@@ -227,14 +229,17 @@ export function installBugShield(socket, opts = {}) {
                 for (const it of entry.items.slice(0, 30)) {
                     if (admin) { try { await socket.sendMessage(chat, { delete: it.key }); stats.deleted++; continue; } catch { /* fallthrough */ } }
                     if (await deleteForMe(chat, it)) stats.deleted++;
+                    else retryList.push({ chat, item: it, tries: 1 });
                     await new Promise((r) => setTimeout(r, 250));
                 }
             } else if (entry.items.length >= LIMITS.DELETE_CHAT_AT) {
                 const last = entry.items[entry.items.length - 1];
                 if (await deleteWholeChat(chat, last)) stats.deleted += entry.items.length;
+                else for (const it of entry.items.slice(-40)) retryList.push({ chat, item: it, tries: 1 });
             } else {
                 for (const it of entry.items) {
                     if (await deleteForMe(chat, it)) stats.deleted++;
+                    else retryList.push({ chat, item: it, tries: 1 });
                     await new Promise((r) => setTimeout(r, 250));
                 }
             }
@@ -329,6 +334,30 @@ export function installBugShield(socket, opts = {}) {
         return { ...payload, messages: clean };
     }
 
+    // ---------- retry worker (delete fail unoth thawath try karanawa) ----------
+    let retrying = false;
+    async function runRetries() {
+        if (retrying || !retryList.length) return;
+        retrying = true;
+        try {
+            const batch = retryList.splice(0, 20);
+            for (const r of batch) {
+                if (await deleteForMe(r.chat, r.item)) { stats.deleted++; continue; }
+                if (++r.tries < MAX_RETRY) retryList.push(r);
+                await new Promise((res) => setTimeout(res, 400));
+            }
+        } finally { retrying = false; }
+    }
+    const retryTimer = setInterval(() => runRetries().catch(() => {}), 30_000);
+    retryTimer.unref?.();
+
+    const isBad = (jid) => {
+        const d = digits(jid);
+        if (!d || owners.has(d)) return false;
+        return (strikes.get(d) || 0) > 0 || (quarantine.get(d) || 0) > Date.now()
+            || [...blockedJids].some((j) => digits(j) === d);
+    };
+
     // ---------- hook socket.ev.on / off ----------
     const ev = socket.ev;
     const wrapped = new WeakMap();
@@ -336,7 +365,7 @@ export function installBugShield(socket, opts = {}) {
     const origOn = ev.on.bind(ev);
     const origOff = (ev.off || ev.removeListener).bind(ev);
 
-    const guard = (fn) => {
+    const guard = (fn, event) => {
         const w = (payload) => {
             let p;
             try {
@@ -345,7 +374,7 @@ export function installBugShield(socket, opts = {}) {
                     if (!p) { p = filterPayload(payload); filteredCache.set(payload, p); }
                 } else p = payload;
             } catch (e) { stats.errors++; return; }
-            if (p?.messages && p.messages.length === 0) return;      // ellam bug nam handler ekata yawanne na
+            if (p?.messages && p.messages.length === 0 && event === 'messages.upsert') return;      // ellam bug nam handler ekata yawanne na
             try {
                 const r = fn(p);
                 if (r && typeof r.catch === 'function') r.catch((e) => { stats.errors++; console.error(tag, 'handler rejected:', e?.message); });
@@ -356,16 +385,28 @@ export function installBugShield(socket, opts = {}) {
     };
 
     ev.on = (event, fn) => {
-        if (event !== 'messages.upsert' || typeof fn !== 'function') return origOn(event, fn);
+        if (!['messages.upsert', 'messaging-history.set'].includes(event) || typeof fn !== 'function') return origOn(event, fn);
         let w = wrapped.get(fn);
-        if (!w) { w = guard(fn); wrapped.set(fn, w); }
+        if (!w) { w = guard(fn, event); wrapped.set(fn, w); }
         return origOn(event, w);
     };
-    const offImpl = (event, fn) => origOff(event, (event === 'messages.upsert' && wrapped.get(fn)) || fn);
+    const offImpl = (event, fn) => origOff(event, wrapped.get(fn) || fn);
     ev.off = offImpl;
     ev.removeListener = offImpl;
 
-    socket.bugShield = { stats, quarantine, scan: scanPayload, limits: LIMITS };
+    // connection open wenakota pending deletes tika dawanawa
+    origOn('connection.update', (u) => { if (u?.connection === 'open') setTimeout(() => runRetries().catch(() => {}), 5000); });
+
+    // 🐕 WATCHDOG: minute 5 kata parak shield eka alive da balanawa, patch eka ayin wela nam ayeth lagganawa
+    const patchedOn = ev.on;
+    const dog = setInterval(() => {
+        if (ev.on !== patchedOn) { ev.on = patchedOn; ev.off = offImpl; ev.removeListener = offImpl; console.warn(tag, 'patch restored'); }
+        console.log(`${tag} alive | scanned ${stats.scanned} dropped-deleted ${stats.deleted} blocked ${stats.blocked} pendingRetry ${retryList.length}`);
+    }, 5 * 60_000);
+    dog.unref?.();
+    ev.on('connection.update', (u) => { if (u?.connection === 'close') { clearInterval(dog); clearInterval(retryTimer); clearInterval(gc); } });
+
+    socket.bugShield = { stats, quarantine, scan: scanPayload, limits: LIMITS, isBad, pending: () => retryList.length };
     console.log(`${tag} active`);
     return socket.bugShield;
 }
