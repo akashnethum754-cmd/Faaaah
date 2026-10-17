@@ -213,6 +213,7 @@ axios.interceptors.response.use(undefined, async (err) => {
 // 🧩 Baileys engine: chama-bailez-pro (stock @whiskeysockets/baileys wenuwata)
 import * as BaileysNS from 'chama-bailez-pro';
 import { installBugShield, installProcessGuards } from './antibug.js';   // 🛡️ bug shield
+import { ecoImageIntent, ecoReadImage, ecoImagePrompt, ecoGenImage, ECO_IMG_BLOCK } from './ecovision.js';   // 🖼️ AI ECO vision + image gen
 const BAILEYS_ACTIVE = 'chama-bailez-pro';
 console.log(`🧩 Baileys engine: ${BAILEYS_ACTIVE}`);
 const makeWASocket = BaileysNS.default?.default || BaileysNS.default || BaileysNS.makeWASocket;
@@ -612,7 +613,7 @@ const config = {
     AWAY_MSG: '',
     AI_ECO: 'false',      // inbox ekata AI chat (.aieco on/off)
     AI_ECO_PROMPT: '',    // AI ekata extra instructions (optional)
-    AI_ECO_LANG: 'si',    // si = Sinhala (default) | singlish   (.aieco lang si|singlish)
+    AI_ECO_LANG: 'auto',  // auto = contact ge bhashawa (default) | si | singlish   (.aieco lang auto|si|singlish)
     COOLDOWN: '2.5',      // seconds, command spam guard (0 = off)
     FREE_DAILY_LIMIT: 4   // free bot: dawasata movie (video file) 4k, hama command ekkama ekathuwa
 };
@@ -2193,7 +2194,7 @@ async function setupAutoReply(socket, number) {
 
 // ==================== 🤖 AI ECO (owner nathnam inbox eke AI chat karanawa) ====================
 const CODEX_AI_URL = process.env.CODEX_AI_URL || 'https://code-x-ai.lovable.app/api/public/v1/chat';
-const CODEX_AI_KEY = process.env.CODEX_API_KEY || 'cx_live_555l2y4l5a5t0y5z1x5a1i4j221o5h3j';
+const CODEX_AI_KEY = process.env.CODEX_API_KEY || 'cx_live_3y6e3r1l3o3h5y50293p6s5u0y4w1835';
 const contactNames = new Map();   // jid / number -> owner ge contacts eke save karapu nama
 const ecoBusy = new Set();
 const ecoQueue = new Map();       // reply denakota awilla thiyena latest message eka
@@ -2256,10 +2257,19 @@ function ecoCatalogue() {
     return _ecoCat;
 }
 
-function ecoBuildPrompt({ name, ownerName, text, extra, lang }) {
+// 🌐 contact ge message eka balala bhashawa therum gannawa (AI_ECO_LANG = auto)
+const SINGLISH_HINT = /\b(mata|oya|oyaa|mama|mn|eka|ekak|ekata|kohomada|kohomda|mokada|mokakda|ow|na|nae|naa|hari|hondai|machan|machang|aiya|akka|nangi|malli|thama|dan|danne|karanna|karan|yanna|enna|denna|ona|one|puluwan|thiyenawa|tiyenawa|kiyala|kiyanna|wage|nathnam|ehenam|ayubowan|suba|kiri|mokak)\b/i;
+function ecoDetectLang(text, fallback) {
+    const t = String(text || '');
+    if (/[\u0D80-\u0DFF]/.test(t)) return 'si';
+    if (SINGLISH_HINT.test(t)) return 'singlish';
+    if (/[a-z]{3,}/i.test(t)) return 'english';
+    return fallback === 'singlish' ? 'singlish' : 'si';
+}
+function ecoBuildPrompt({ name, ownerName, text, extra, lang, hasImage }) {
     const who = name || 'friend';
     return `You are ${ownerName}'s AI assistant. ${ownerName} is busy, so you are replying on WhatsApp to their contact "${who}". Write ONLY the message to send (no notes, no quotes, no explanations, no brackets).
-Rules: chat like a friendly person texting a friend: casual, warm, short (1-2 lines), max 1-2 emojis. ${lang === 'singlish' ? 'Reply in Singlish (Sinhala words written in English letters), even if they write Sinhala script.' : 'ALWAYS reply in natural, spoken Sinhala using Sinhala script, no matter how the contact writes (Singlish, English or Sinhala). Keep words like busy, AI assistant, movie names and song names in English.'} Mention that ${ownerName} is busy and you are their AI assistant only once or when it fits. Never pretend to be human or ${ownerName}. You cannot make files or promises; if they want a movie, song or download, tell them to just say it (e.g. "avatar film ekak one", "song ekak one despacito"). If it is urgent, say you will pass the message on. ${extra || ''}
+Rules: chat like a friendly person texting a friend: casual, warm, short (1-2 lines), max 1-2 emojis. ${lang === 'english' ? 'Reply in simple, casual English.' : lang === 'singlish' ? 'Reply in Singlish (Sinhala words written in English letters), even if they write Sinhala script.' : 'ALWAYS reply in natural, spoken Sinhala using Sinhala script, no matter how the contact writes (Singlish, English or Sinhala). Keep words like busy, AI assistant, movie names and song names in English.'} Mention that ${ownerName} is busy and you are their AI assistant only once or when it fits. Never pretend to be human or ${ownerName}. You cannot make files or promises; if they want a movie, song or download, tell them to just say it (e.g. "avatar film ekak one", "song ekak one despacito"). If they want a picture drawn or generated, tell them to say e.g. "space cat image ekak hadanna". ${hasImage ? 'The contact ALSO sent the attached photo: look at it carefully and respond to it naturally (answer their question about it, read any text in it, or react like a friend). Never identify real people from their faces.' : ''} If it is urgent, say you will pass the message on. ${extra || ''}
 Contact "${who}" says: ${text}`;
 }
 
@@ -2271,21 +2281,33 @@ function ecoClean(raw) {
     return t.slice(0, 600);
 }
 
-async function aiEcoReply({ name, ownerName, text, session, extra, lang }) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 25000);
-    try {
-        const res = await fetch(CODEX_AI_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CODEX_AI_KEY}` },
-            body: JSON.stringify({ message: ecoBuildPrompt({ name, ownerName, text, extra, lang }), session }),
-            signal: ctrl.signal
-        });
-        const data = await res.json();
-        return ecoClean(data.reply);
-    } finally {
-        clearTimeout(timer);
+async function aiEcoReply({ name, ownerName, text, session, extra, lang, imageUrl, rawMessage }) {
+    // 🔁 AI API eka fail / empty unoth 2 parak try karanawa (2nd try ekata session nathuwa, memory loop wenna ba)
+    let lastErr;
+    for (let attempt = 0; attempt < 2; attempt++) {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 20000);
+        try {
+            const res = await fetch(CODEX_AI_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${CODEX_AI_KEY}` },
+                body: JSON.stringify({ message: rawMessage || ecoBuildPrompt({ name, ownerName, text, extra, lang, hasImage: !!imageUrl }), session: attempt ? `${session}:r${Date.now() % 1000}` : session, ...(imageUrl ? { image_url: imageUrl } : {}) }),
+                signal: ctrl.signal
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(`AI HTTP ${res.status}: ${data.error || data.message || ''}`.trim());
+            const out = ecoClean(data.reply);
+            if (out) return out;
+            lastErr = new Error('empty reply');
+        } catch (e) {
+            lastErr = e;
+            console.error('[AI ECO] API error (try ' + (attempt + 1) + '):', e.message);
+        } finally {
+            clearTimeout(timer);
+        }
+        await new Promise(r => setTimeout(r, 800));
     }
+    throw lastErr || new Error('AI failed');
 }
 
 // ---------- 🧭 Intent router (AI eken nathuwa, bot ma therum gannawa: fast + hari) ----------
@@ -2315,6 +2337,9 @@ function ecoIntent(textRaw) {
     const url = (text.match(/https?:\/\/\S+/) || [])[0] || '';
     const names = ecoCatalogue().names;
 
+    const imgIt = ecoImageIntent(text);          // 🎨 "... image ekak hadanna"
+    if (imgIt) return imgIt;
+
     if (ECO_MENU_W.test(text) && words <= 9) return { type: 'menu' };
 
     if (ECO_MOVIE_W.test(text) && ECO_WANT.test(text)) {
@@ -2342,7 +2367,10 @@ function ecoIntent(textRaw) {
 }
 function ecoIntentReply(it, name, lang) {
     const n = name ? ` ${name}` : '';
-    const si = lang !== 'singlish';
+    const si = lang === 'si';
+    if (it.type === 'image') return { say: lang === 'english' ? `Sure${n}, I'll make that image and send it, one sec 🎨` : si ? `හරි${n}, පින්තූරේ හදලා එවන්නම්, ටිකක් ඉන්න 🎨` : `Hari${n}, pinthuraya hadala yawannam, poddak inna 🎨`, action: it };
+    if (it.type === 'image_blocked') return { say: lang === 'english' ? 'Sorry, I cannot make that kind of image 🙂' : si ? 'ඒ වගේ පින්තූර මට හදන්න බෑ 🙂' : 'Eka wage pinthura mata hadanna ba 🙂', action: null };
+    if (it.type === 'ask' && it.what === 'image') return { say: lang === 'english' ? `What image should I make${n}? Tell me what you want 🎨` : si ? `මොන පින්තූරයද හදන්න ඕනේ${n}? මොකක්ද ඕනේ කියන්න 🎨` : `Mona pinthurayada hadanna one${n}? Mokakda one kiyanna 🎨`, action: null };
     if (it.type === 'menu') return { say: si
         ? `මට පුළුවන්${n}: 🎬 ෆිල්ම් එකක් හොයලා එවන්න (නම කියන්න), 🎵 සිංදු / YouTube / TikTok download, 🌦️ කාලගුණය, 📰 පුවත් වගේ දේවල්.\nබොට් මෙනු එක එවන්නම් 👇`
         : `Mata puluwan${n}: 🎬 film hoyala yawanna (nama kiyanna), 🎵 song / youtube / tiktok download, 🌦️ weather, 📰 news wage dewal.\nBot menu eka yawannam 👇`, action: { type: 'menu' } };
@@ -2360,6 +2388,10 @@ function ecoIntentReply(it, name, lang) {
 function ecoFollowUp(p, text) {
     const t = String(text || '').trim();
     if (!t || t.length > 200) return null;
+    if (p.kind === 'image') {
+        if (/^\d+$/.test(t)) return null;
+        return ECO_IMG_BLOCK.test(t) ? { type: 'image_blocked' } : { type: 'image', prompt: t.slice(0, 200) };
+    }
     const quality = (t.match(/\b(480|720|1080|2160)p?\b/i) || [])[1] || '';
     const url = (t.match(/https?:\/\/\S+/) || [])[0] || '';
     if (p.kind === 'cmd' && ['tiktok', 'mediafire', 'yt'].includes(p.cmd) && url) return { type: 'command', cmd: `${p.cmd} ${url}`.slice(0, 200) };
@@ -2655,6 +2687,8 @@ async function setupCommandHandlers(socket, number) {
             text = msg.message.buttonsResponseMessage.selectedButtonId;
         } else if (msg.message.imageMessage?.caption) {
             text = msg.message.imageMessage.caption.trim();   // image + caption (.nt wage)
+        } else if (msg.message.imageMessage && sessionConfig.AI_ECO === 'true' && !msg.key.fromMe && !String(msg.key.remoteJid).endsWith('@g.us')) {
+            text = '';   // 🖼️ caption nathi photo ekak: AI ECO ekata balanna denawa
         } else {
             return;
         }
@@ -2728,9 +2762,11 @@ async function setupCommandHandlers(socket, number) {
             } catch (alErr) { console.error('[AntiLink]', alErr.message); }
         }
 
+        const ecoHasImage = !!msg.message?.imageMessage;      // 🖼️ photo ekak awoth AI eka balanawa
         // 🤖 AI ECO (inbox): .aieco on -> owner nathnam AI eka contact ge nama ekka chat karanawa (menu / commands / movie auto)
         if (sessionConfig.AI_ECO === 'true' && !isGroup && !isCmd && !isOwner && !msg.key.fromMe && planNow !== 'unverified'
-            && (from.endsWith('@s.whatsapp.net') || from.endsWith('@lid')) && !/^\d{1,3}$/.test(text) && text.length <= 1000) {
+            && !socket.bugShield?.isBad?.(msg.key.remoteJidAlt || from)      // 🛡️ bug / flood karapu ekata AI reply karanne na
+            && (from.endsWith('@s.whatsapp.net') || from.endsWith('@lid')) && !/^\d{1,3}$/.test(text) && text.length <= 1000 && (text || ecoHasImage)) {
             const ecoKey = `${sanitizedNumber}:${from}`;
             if (ecoBusy.has(ecoKey)) {
                 ecoQueue.set(ecoKey, text);
@@ -2740,7 +2776,9 @@ async function setupCommandHandlers(socket, number) {
                 const ecoName = ecoContactName(from, msg.pushName);
                 const ownerName = String(sessionConfig.BOT_OWNER_NAME || socket.user?.name || 'the owner').replace(/[\r\n]/g, ' ').slice(0, 40);
                 const ecoPrefix = sessionConfig.PREFIX || config.PREFIX || '.';
-                const ecoLang = sessionConfig.AI_ECO_LANG === 'singlish' ? 'singlish' : 'si';
+                const ecoLang = sessionConfig.AI_ECO_LANG === 'auto' || !sessionConfig.AI_ECO_LANG
+                    ? ecoDetectLang(text, 'si')
+                    : sessionConfig.AI_ECO_LANG === 'singlish' ? 'singlish' : 'si';
                 const ecoSay = async (t) => {
                     await socket.sendPresenceUpdate('composing', from).catch(() => {});
                     await new Promise(r => setTimeout(r, Math.min(1200, 250 + t.length * 8)));
@@ -2765,7 +2803,22 @@ async function setupCommandHandlers(socket, number) {
                 const ecoAct = (c, act) => {
                     if (!act || typeof act !== 'object') return;
                     if (c.a >= 8) return;                                   // ghanta ekakata actions 8k
-                    if (act.type === 'menu') { c.a++; ecoDispatch('menu'); }
+                    if (act.type === 'image') {
+                        if ((c.g || 0) >= 5) { ecoSay(ecoLang === 'si' ? 'පින්තූර ගොඩක් ඉල්ලුවා, ටිකක් ඉඳලා ආයෙ කියන්න 🙂' : 'Pinthura godak illuwa, poddak indala aye kiyanna 🙂'); return; }
+                        c.g = (c.g || 0) + 1; c.a++;
+                        (async () => {
+                            try {
+                                socket.sendPresenceUpdate('composing', from).catch(() => {});
+                                const gp = await ecoImagePrompt(act.prompt, (m) => aiEcoReply({ rawMessage: m, session: `ecoimg:${Date.now()}` }));
+                                const d = await ecoGenImage(gp);
+                                await socket.sendMessage(from, { image: { url: d.image }, caption: ecoLang === 'si' ? '🎨 ඔන්න ඔයාගේ පින්තූරේ' : '🎨 Meka oyage pinthuraya' });
+                            } catch (ie) {
+                                console.error('[AI ECO] image gen', ie.message);
+                                await ecoSay(ecoLang === 'si' ? 'පින්තූරේ හදන්න බැරි වුණා, ආයෙ try කරන්න 🙂' : 'Pinthuraya hadanna bari una, aye try karanna 🙂').catch(() => {});
+                            } finally { socket.sendPresenceUpdate('paused', from).catch(() => {}); }
+                        })();
+                    }
+                    else if (act.type === 'menu') { c.a++; ecoDispatch('menu'); }
                     else if (act.type === 'command') { if (ecoDispatch(act.cmd)) { c.a++; ecoNavStart(from, act.query, act.quality, msg.pushName, ecoLang); } }
                     else if (act.type === 'movie') {
                         const q = String(act.query || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 80);
@@ -2779,18 +2832,28 @@ async function setupCommandHandlers(socket, number) {
                     }
                 };
                 (async () => {
-                    let cur = text;
+                    let cur = text || (ecoHasImage ? '(sent a photo with no caption)' : '');
+                    let curImg = ecoHasImage ? msg : null;
                     while (cur) {
                         try {
                             const c = ecoCount.get(ecoKey) || { n: 0, a: 0, m: 0, t: Date.now() };
-                            if (Date.now() - c.t > 60 * 60 * 1000) { c.n = 0; c.a = 0; c.m = 0; c.t = Date.now(); }
+                            if (Date.now() - c.t > 60 * 60 * 1000) { c.n = 0; c.a = 0; c.m = 0; c.g = 0; c.t = Date.now(); }
                             if (c.n >= 40) break;                           // ghanta ekakata reply 40k witharai
                             c.n++; ecoCount.set(ecoKey, c);
 
                             socket.sendPresenceUpdate('composing', from).catch(() => {});
-                            let intent = ecoIntent(cur);
+                            let imgUrl = null;
+                            if (curImg) {                                   // 🖼️ photo eka download karala AI ekata
+                                const im = curImg; curImg = null;
+                                imgUrl = await ecoReadImage(im, downloadMediaMessage).catch(e => { console.error('[AI ECO] image read', e.message); return null; });
+                                if (!imgUrl && !text) {
+                                    await ecoSay(ecoLang === 'si' ? 'ෆොටෝ එක බලාගන්න බැරි වුණා, ආයෙ එවන්න 🙂' : 'Photo eka balaganna bari una, aye yawanna 🙂');
+                                    break;
+                                }
+                            }
+                            let intent = imgUrl ? null : ecoIntent(cur);
                             const pend = ecoPending.get(ecoKey);
-                            if (!intent && pend && Date.now() < pend.until) intent = ecoFollowUp(pend, cur);   // "Avatar" / "Saritha" wage uththara
+                            if (!intent && !imgUrl && pend && Date.now() < pend.until) intent = ecoFollowUp(pend, cur);   // "Avatar" / "Saritha" wage uththara
                             ecoPending.delete(ecoKey);
                             if (intent && intent.type === 'ask') ecoPending.set(ecoKey, { ...intent, until: Date.now() + 3 * 60 * 1000 });
                             let out;
@@ -2801,7 +2864,8 @@ async function setupCommandHandlers(socket, number) {
                                     name: ecoName, ownerName, text: cur,
                                     session: `eco:${sanitizedNumber}:${from}`,
                                     extra: sessionConfig.AI_ECO_PROMPT || '',
-                                    lang: ecoLang
+                                    lang: ecoLang,
+                                    imageUrl: imgUrl
                                 });
                                 if (!raw) throw new Error('empty reply');
                                 out = { say: raw, action: null };
@@ -15026,7 +15090,7 @@ case 'aieco': {
             text: formatMessage(
                 sub === 'on' ? '🤖 AI ECO ON' : '🤖 AI ECO OFF',
                 sub === 'on'
-                    ? `✅ *Dan inbox ekata message ewana kenek ta AI eka reply karanawa.*\n\n👤 Contact eke save karapu nama use karanawa\n💬 Social widiyata natural chat karanawa\n📋 "menu / commands" kiwwoth bot menu eka yawanawa\n⚙️ Bot commands (song, video, tools...) ona kenekta run karanawa\n🎬 Movie nama kiwwoth CineSubz eken hoyala auto yawanawa\n🚫 Groups, owner commands, oyaage own messages wala wada karanne nae`
+                    ? `✅ *Dan inbox ekata message ewana kenek ta AI eka reply karanawa.*\n\n👤 Contact eke save karapu nama use karanawa\n💬 Social widiyata natural chat karanawa\n📋 "menu / commands" kiwwoth bot menu eka yawanawa\n⚙️ Bot commands (song, video, tools...) ona kenekta run karanawa\n🎬 Movie nama kiwwoth CineSubz eken hoyala auto yawanawa\n🖼️ Photo ekak ewwoth AI eka balala uththara denawa\n🎨 "cat image ekak hadanna" kiwwoth AI image hadala yawanawa\n🚫 Groups, owner commands, oyaage own messages wala wada karanne nae`
                     : `❌ *AI ECO off kala.*`,
                 ecoFooter
             )
@@ -15034,11 +15098,12 @@ case 'aieco': {
     }
     if (sub === 'lang') {
         const l = (args[1] || '').toLowerCase();
-        if (!['si', 'sinhala', 'singlish'].includes(l)) {
-            return await socket.sendMessage(sender, { text: `📝 *Use:* \`${P5}aieco lang si\` (Sinhala) | \`${P5}aieco lang singlish\`` }, { quoted: msg });
+        if (!['auto', 'si', 'sinhala', 'singlish'].includes(l)) {
+            return await socket.sendMessage(sender, { text: `📝 *Use:* \`${P5}aieco lang auto\` (contact ge bhashawa) | \`${P5}aieco lang si\` | \`${P5}aieco lang singlish\`` }, { quoted: msg });
         }
-        await saveEco({ AI_ECO_LANG: l === 'singlish' ? 'singlish' : 'si' });
-        return await socket.sendMessage(sender, { text: `✅ *AI bhashawa:* ${l === 'singlish' ? 'Singlish' : 'Sinhala'}` }, { quoted: msg });
+        const nl = l === 'auto' ? 'auto' : l === 'singlish' ? 'singlish' : 'si';
+        await saveEco({ AI_ECO_LANG: nl });
+        return await socket.sendMessage(sender, { text: `✅ *AI bhashawa:* ${nl === 'auto' ? 'Auto (contact ge bhashawa)' : nl === 'singlish' ? 'Singlish' : 'Sinhala'}` }, { quoted: msg });
     }
     if (sub === 'prompt') {
         const p = args.slice(1).join(' ').trim();
@@ -15056,7 +15121,7 @@ case 'aieco': {
     return await socket.sendMessage(sender, {
         text: formatMessage(
             '🤖 AI ECO',
-            `*Status:* ${isOn ? 'ON ✅' : 'OFF ❌'}\n*Language:* ${sessionConfig.AI_ECO_LANG === 'singlish' ? 'Singlish' : 'Sinhala'}\n*Extra prompt:* ${sessionConfig.AI_ECO_PROMPT ? '_' + sessionConfig.AI_ECO_PROMPT.slice(0, 80) + '_' : '_(none)_'}\n\n📝 *Use:*\n\`${P5}aieco on\`\n\`${P5}aieco off\`\n\`${P5}aieco lang si|singlish\`\n\`${P5}aieco prompt <extra instructions>\``,
+            `*Status:* ${isOn ? 'ON ✅' : 'OFF ❌'}\n*Language:* ${sessionConfig.AI_ECO_LANG === 'singlish' ? 'Singlish' : sessionConfig.AI_ECO_LANG === 'si' ? 'Sinhala' : 'Auto'}\n*Extra prompt:* ${sessionConfig.AI_ECO_PROMPT ? '_' + sessionConfig.AI_ECO_PROMPT.slice(0, 80) + '_' : '_(none)_'}\n\n📝 *Use:*\n\`${P5}aieco on\`\n\`${P5}aieco off\`\n\`${P5}aieco lang auto|si|singlish\`\n\`${P5}aieco prompt <extra instructions>\``,
             ecoFooter
         )
     }, { quoted: msg });
@@ -15096,7 +15161,7 @@ case 'codex': {
             imageUrl = `data:${mimeType};base64,${stream.toString('base64')}`;
         }
 
-        const CODEX_API_KEY = "cx_live_555l2y4l5a5t0y5z1x5a1i4j221o5h3j";
+        const CODEX_API_KEY = CODEX_AI_KEY;
         const CODEX_URL = "https://code-x-ai.lovable.app/api/public/v1/chat";
 
         const apiResponse = await fetch(CODEX_URL, {
